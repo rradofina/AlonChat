@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { createServerClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Header } from '@/components/layout/header'
 
@@ -8,7 +8,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const supabase = await createServerClient()
+  const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
 
@@ -20,7 +20,7 @@ export default async function DashboardLayout({
   const { data: workspaces } = await supabase
     .from('workspaces')
     .select('*')
-    .or(`owner_id.eq.${user.id},workspace_members.user_id.eq.${user.id}`)
+    .eq('owner_id', user.id)
     .order('created_at', { ascending: false })
 
   // If no workspace, create one

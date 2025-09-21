@@ -34,7 +34,7 @@ interface SidebarProps {
 export function Sidebar({ workspaces, user }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [workspaceDropdown, setWorkspaceDropdown] = useState(false)
-  const [selectedWorkspace, setSelectedWorkspace] = useState(workspaces[0])
+  const [selectedWorkspace, setSelectedWorkspace] = useState(workspaces[0] || null)
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
@@ -104,14 +104,16 @@ export function Sidebar({ workspaces, user }: SidebarProps) {
               >
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium truncate">
-                    {selectedWorkspace.name}
+                    {selectedWorkspace?.name || 'No workspace'}
                   </span>
-                  <span className={cn(
-                    "text-xs px-2 py-0.5 rounded text-white",
-                    getPlanBadgeColor(selectedWorkspace.plan_tier)
-                  )}>
-                    {selectedWorkspace.plan_tier}
-                  </span>
+                  {selectedWorkspace && (
+                    <span className={cn(
+                      "text-xs px-2 py-0.5 rounded text-white",
+                      getPlanBadgeColor(selectedWorkspace.plan_tier)
+                    )}>
+                      {selectedWorkspace.plan_tier}
+                    </span>
+                  )}
                 </div>
                 <ChevronDown className={cn(
                   "h-4 w-4 transition-transform",
