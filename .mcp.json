@@ -15,7 +15,7 @@
       "command": "cmd",
       "args": ["/c", "npx", "@supabase/mcp-server-supabase@latest"],
       "env": {
-        "SUPABASE_ACCESS_TOKEN": "sbp_039cd257df3f113b071337995b3f4b4f6e091a83",
+        "SUPABASE_ACCESS_TOKEN": "sbp_v0_923a17526acdf60e00ef16e06e0dc054ecf5d6f3",
         "SUPABASE_PROJECT_REF": "owbwwkgiyvylmdvuiwsn"
       }
     },
