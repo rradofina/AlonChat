@@ -1,10 +1,18 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useParams } from 'next/navigation'
-import { Bot, ChevronRight } from 'lucide-react'
+import { usePathname, useParams, useRouter } from 'next/navigation'
+import { Bot, ChevronRight, User, Settings, LogOut, Shield, Key, Database, Code } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 interface DashboardHeaderProps {
   projectName?: string
@@ -14,20 +22,37 @@ interface DashboardHeaderProps {
 export function DashboardHeader({ projectName, agentName }: DashboardHeaderProps) {
   const pathname = usePathname()
   const params = useParams()
+  const router = useRouter()
   const [agent, setAgent] = useState<any>(null)
   const [project, setProject] = useState<any>(null)
+  const [user, setUser] = useState<any>(null)
+  const [profile, setProfile] = useState<any>(null)
   const supabase = createClient()
 
   useEffect(() => {
     async function fetchData() {
-      // Get project info if not provided
-      if (!projectName) {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) {
+      // Get user info
+      const { data: { user: currentUser } } = await supabase.auth.getUser()
+      if (currentUser) {
+        setUser(currentUser)
+
+        // Get profile info
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', currentUser.id)
+          .single()
+
+        if (profileData) {
+          setProfile(profileData)
+        }
+
+        // Get project info if not provided
+        if (!projectName) {
           const { data: projects } = await supabase
             .from('projects')
             .select('*')
-            .eq('owner_id', user.id)
+            .eq('owner_id', currentUser.id)
             .order('created_at', { ascending: false })
             .limit(1)
 
@@ -93,7 +118,7 @@ export function DashboardHeader({ projectName, agentName }: DashboardHeaderProps
         )}
       </div>
 
-      {/* Right side - user menu can go here */}
+      {/* Right side - user menu */}
       <div className="ml-auto flex items-center gap-4">
         <Link href="/changelog" className="text-sm text-gray-600 hover:text-gray-900">
           Changelog
@@ -104,6 +129,73 @@ export function DashboardHeader({ projectName, agentName }: DashboardHeaderProps
         <Link href="/help" className="text-sm text-gray-600 hover:text-gray-900">
           Help
         </Link>
+
+        {/* Profile Dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="flex items-center justify-center h-8 w-8 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors">
+              {profile?.avatar_url ? (
+                <img src={profile.avatar_url} alt="Profile" className="h-8 w-8 rounded-full" />
+              ) : (
+                <User className="h-4 w-4 text-gray-600" />
+              )}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>
+              <div className="flex flex-col">
+                <span className="text-sm font-medium">{profile?.full_name || 'User'}</span>
+                <span className="text-xs text-gray-500">{user?.email}</span>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+
+            <DropdownMenuItem onClick={() => router.push('/dashboard')}>
+              <User className="mr-2 h-4 w-4" />
+              Dashboard
+            </DropdownMenuItem>
+
+            <DropdownMenuItem onClick={() => router.push('/dashboard/settings/api-keys')}>
+              <Key className="mr-2 h-4 w-4" />
+              API Keys
+            </DropdownMenuItem>
+
+            <DropdownMenuItem onClick={() => router.push('/dashboard/settings')}>
+              <Settings className="mr-2 h-4 w-4" />
+              Account settings
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+
+            {/* Admin Section - Temporary for Development */}
+            <div className="px-2 py-1.5">
+              <span className="text-xs text-gray-500 uppercase tracking-wider">Admin (Dev Only)</span>
+            </div>
+
+            <DropdownMenuItem onClick={() => router.push('/admin/models')}>
+              <Database className="mr-2 h-4 w-4 text-red-600" />
+              <span className="text-red-600">Manage Models</span>
+            </DropdownMenuItem>
+
+            <DropdownMenuItem onClick={() => router.push('/admin/providers')}>
+              <Code className="mr-2 h-4 w-4 text-purple-600" />
+              <span className="text-purple-600">Manage Providers</span>
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+
+            <DropdownMenuItem
+              onClick={async () => {
+                await supabase.auth.signOut()
+                router.push('/login')
+              }}
+              className="text-red-600"
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   )

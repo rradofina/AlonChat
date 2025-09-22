@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { OpenAI } from 'openai'
+import { aiService } from '@/lib/ai/ai-service'
+import { ChatMessage } from '@/lib/ai/providers/base'
 import { z } from 'zod'
 
 const ChatRequestSchema = z.object({
@@ -8,10 +9,6 @@ const ChatRequestSchema = z.object({
   sessionId: z.string().optional()
 })
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || ''
-})
 
 export async function POST(
   request: NextRequest,
@@ -118,8 +115,8 @@ export async function POST(
         })
     }
 
-    // Prepare messages for OpenAI
-    const messages: any[] = [
+    // Prepare messages
+    const messages: ChatMessage[] = [
       {
         role: 'system',
         content: agent.system_prompt || `You are a helpful AI assistant. Use the following knowledge base to answer questions:\n\n${context}`
@@ -155,57 +152,52 @@ export async function POST(
       })
     }
 
-    // Call OpenAI
+    // Call AI service
     let response = ''
     let tokensUsed = 0
+    let costUsd = 0
+    const modelName = agent.model || 'gemini-1.5-flash'
 
-    if (process.env.OPENAI_API_KEY) {
-      try {
-        const completion = await openai.chat.completions.create({
-          model: agent.model || 'gpt-3.5-turbo',
-          messages: messages,
-          temperature: agent.temperature || 0.7,
-          max_tokens: agent.max_tokens || 500,
+    try {
+      const result = await aiService.chat(
+        modelName,
+        messages,
+        {
+          temperature: agent.temperature,
+          maxTokens: agent.max_tokens
+        }
+      )
+
+      response = result.content
+      tokensUsed = result.usage?.totalTokens || 0
+      costUsd = result.estimatedCost || 0
+
+      // Log usage
+      const creditsUsed = Math.max(1, Math.ceil(tokensUsed / 100))
+      await supabase
+        .from('usage_logs')
+        .insert({
+          project_id: agent.project_id,
+          agent_id: agentId,
+          type: 'completion',
+          model: modelName,
+          action: 'message',
+          credits_used: creditsUsed,
+          input_tokens: result.usage?.promptTokens || 0,
+          output_tokens: result.usage?.completionTokens || 0,
+          total_tokens: tokensUsed,
+          cost_usd: costUsd,
+          conversation_id: conversation?.id
         })
+    } catch (error: any) {
+      console.error('AI Service error:', error)
 
-        response = completion.choices[0]?.message?.content || 'I apologize, but I could not generate a response.'
-        tokensUsed = completion.usage?.total_tokens || 0
-
-        // Log usage
-        const creditsUsed = Math.ceil(tokensUsed / 10) // 1 credit per 10 tokens
-        await supabase
-          .from('usage_logs')
-          .insert({
-            project_id: agent.project_id,
-            agent_id: agentId,
-            type: 'completion',
-            model: agent.model || 'gpt-3.5-turbo',
-            action: 'message',
-            credits_used: creditsUsed,
-            input_tokens: completion.usage?.prompt_tokens || 0,
-            output_tokens: completion.usage?.completion_tokens || 0,
-            total_tokens: tokensUsed,
-            cost_usd: (tokensUsed * 0.002) / 1000, // Approximate cost
-            conversation_id: conversation?.id
-          })
-      } catch (error) {
-        console.error('OpenAI error:', error)
-        response = 'I apologize, but I encountered an error. Please try again later.'
-      }
-    } else {
-      // Fallback response when no API key
-      if (validatedData.message.toLowerCase().includes('business hours') ||
-          validatedData.message.toLowerCase().includes('hours')) {
-        response = 'We are open Monday to Friday, 9 AM to 6 PM Philippine Time.'
-      } else if (validatedData.message.toLowerCase().includes('shipping')) {
-        response = 'Yes, we offer free shipping for orders over ₱1,500 within Metro Manila.'
-      } else if (validatedData.message.toLowerCase().includes('payment')) {
-        response = 'We accept GCash, PayMaya, bank transfers, and cash on delivery.'
-      } else if (validatedData.message.toLowerCase().includes('track') ||
-                 validatedData.message.toLowerCase().includes('order')) {
-        response = 'You will receive a tracking number via SMS once your order is shipped.'
+      // Check if it's a configuration error
+      if (error.message?.includes('not configured')) {
+        // Provide helpful fallback for unconfigured models
+        response = await getFallbackResponse(validatedData.message)
       } else {
-        response = `I understand you're asking about "${validatedData.message}". Based on my knowledge base, I can help with business hours, shipping, payment methods, and order tracking. What would you like to know?`
+        response = 'I apologize, but I encountered an error. Please try again later.'
       }
     }
 
@@ -235,4 +227,27 @@ export async function POST(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
+}
+
+// Fallback responses when AI is not configured
+async function getFallbackResponse(message: string): Promise<string> {
+  const lowerMessage = message.toLowerCase()
+
+  if (lowerMessage.includes('business hours') || lowerMessage.includes('hours')) {
+    return 'We are open Monday to Friday, 9 AM to 6 PM Philippine Time.'
+  }
+
+  if (lowerMessage.includes('shipping')) {
+    return 'Yes, we offer free shipping for orders over ₱1,500 within Metro Manila.'
+  }
+
+  if (lowerMessage.includes('payment')) {
+    return 'We accept GCash, PayMaya, bank transfers, and cash on delivery.'
+  }
+
+  if (lowerMessage.includes('track') || lowerMessage.includes('order')) {
+    return 'You will receive a tracking number via SMS once your order is shipped.'
+  }
+
+  return `I understand you're asking about "${message}". Based on my knowledge base, I can help with business hours, shipping, payment methods, and order tracking. What would you like to know?`
 }

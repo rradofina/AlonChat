@@ -152,23 +152,51 @@ class ConfigService {
     return [
       {
         id: '1',
-        name: 'gpt-4o-mini',
-        display_name: 'GPT-4o Mini',
-        provider: 'openai',
-        model_id: 'gpt-4o-mini',
-        description: 'Affordable and intelligent small model',
+        name: 'gemini-1.5-flash',
+        display_name: 'Gemini 1.5 Flash',
+        provider: 'google',
+        model_id: 'gemini-1.5-flash',
+        description: 'Fast and free model from Google',
+        context_window: 1048576,
+        max_tokens: 8192,
         is_active: true,
         sort_order: 1
       },
       {
         id: '2',
+        name: 'gpt-4o-mini',
+        display_name: 'GPT-4o Mini',
+        provider: 'openai',
+        model_id: 'gpt-4o-mini',
+        description: 'Affordable and intelligent small model',
+        context_window: 128000,
+        max_tokens: 4096,
+        is_active: true,
+        sort_order: 2
+      },
+      {
+        id: '3',
         name: 'gpt-3.5-turbo',
         display_name: 'GPT-3.5 Turbo',
         provider: 'openai',
         model_id: 'gpt-3.5-turbo',
         description: 'Fast, inexpensive model for simple tasks',
+        context_window: 16385,
+        max_tokens: 4096,
         is_active: true,
-        sort_order: 2
+        sort_order: 3
+      },
+      {
+        id: '4',
+        name: 'gemini-1.5-pro',
+        display_name: 'Gemini 1.5 Pro',
+        provider: 'google',
+        model_id: 'gemini-1.5-pro',
+        description: 'Advanced model with large context window',
+        context_window: 2097152,
+        max_tokens: 8192,
+        is_active: true,
+        sort_order: 4
       }
     ]
   }
@@ -197,7 +225,7 @@ You are an AI assistant who helps users with their inquiries, issues and request
 
   private getFallbackSettings(): Record<string, any> {
     return {
-      default_model: 'gpt-4o-mini',
+      default_model: 'gemini-1.5-flash',
       max_conversation_length: 100,
       enable_model_comparison: true,
       supported_file_types: ['pdf', 'txt', 'docx', 'csv', 'json'],
