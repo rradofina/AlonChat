@@ -69,58 +69,43 @@ export default function NewAgentPage() {
     setIsCreating(true)
 
     try {
-      // Get user and workspace
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not authenticated')
+      // Prepare sources data for API
+      const sourcesData = sources.map(source => ({
+        type: source.type === 'files' ? 'file' : source.type,
+        name: source.name,
+        content: source.data.content || source.data.text || '',
+        url: source.data.url,
+        size: source.size,
+        qaItems: source.data.qaItems,
+        fileName: source.data.fileName,
+        fileType: source.data.fileType,
+        fileData: source.data.fileData
+      }))
 
-      const { data: workspaces } = await supabase
-        .from('workspaces')
-        .select('id')
-        .eq('owner_id', user.id)
-        .limit(1)
-
-      if (!workspaces || workspaces.length === 0) {
-        throw new Error('No workspace found')
-      }
-
-      // Create the agent
-      const { data: agent, error: agentError } = await supabase
-        .from('agents')
-        .insert({
+      // Call the API route
+      const response = await fetch('/api/agents/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
           name: agentName,
-          workspace_id: workspaces[0].id,
-          status: 'training',
-          created_by: user.id,
+          description: `AI Agent trained with ${sources.length} sources`,
+          sources: sourcesData
         })
-        .select()
-        .single()
+      })
 
-      if (agentError) throw agentError
+      const result = await response.json()
 
-      // Create sources for the agent
-      for (const source of sources) {
-        const sourceData = {
-          agent_id: agent.id,
-          type: source.type === 'files' ? 'file' : source.type,
-          name: source.name,
-          config: source.data,
-          status: 'pending',
-        }
-
-        const { error: sourceError } = await supabase
-          .from('sources')
-          .insert(sourceData)
-
-        if (sourceError) {
-          console.error('Error creating source:', sourceError)
-        }
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to create agent')
       }
 
       toast.success('Agent created successfully!')
-      router.push(`/dashboard/agents/${agent.id}`)
+      router.push(`/dashboard/agents/${result.agent.id}`)
     } catch (error) {
       console.error('Error creating agent:', error)
-      toast.error('Failed to create agent')
+      toast.error(error instanceof Error ? error.message : 'Failed to create agent')
     } finally {
       setIsCreating(false)
     }

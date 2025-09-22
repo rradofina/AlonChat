@@ -16,7 +16,7 @@ import { Bot, ChevronLeft, ChevronRight, Sparkles, MessageSquare, Settings, Rock
 interface AgentWizardProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  workspaceId: string
+  projectId: string
 }
 
 const steps = [
@@ -26,7 +26,7 @@ const steps = [
   { title: 'Review', description: 'Review and create your agent', icon: Rocket },
 ]
 
-export function AgentWizard({ open, onOpenChange, workspaceId }: AgentWizardProps) {
+export function AgentWizard({ open, onOpenChange, projectId }: AgentWizardProps) {
   const [currentStep, setCurrentStep] = useState(0)
   const [isCreating, setIsCreating] = useState(false)
   const router = useRouter()
@@ -67,7 +67,7 @@ export function AgentWizard({ open, onOpenChange, workspaceId }: AgentWizardProp
       const { data: agent, error } = await supabase
         .from('agents')
         .insert({
-          workspace_id: workspaceId,
+          project_id: projectId,
           name: formData.name,
           description: formData.description,
           model: formData.model,

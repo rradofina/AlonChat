@@ -4,10 +4,10 @@ import Link from 'next/link'
 import { Plus } from 'lucide-react'
 
 interface NewAgentButtonProps {
-  workspaceId: string
+  projectId: string
 }
 
-export function NewAgentButton({ workspaceId }: NewAgentButtonProps) {
+export function NewAgentButton({ projectId }: NewAgentButtonProps) {
   return (
     <Link
       href="/dashboard/agents/new"

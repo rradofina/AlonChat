@@ -9,13 +9,16 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
-      workspaces: {
+      projects: {
         Row: {
           id: string
           name: string
           url_slug: string
           plan_tier: 'free' | 'starter' | 'pro' | 'enterprise'
           owner_id: string
+          billing_email: string | null
+          tax_type: string | null
+          tax_id: string | null
           created_at: string
           updated_at: string
         }
@@ -25,6 +28,9 @@ export interface Database {
           url_slug: string
           plan_tier?: 'free' | 'starter' | 'pro' | 'enterprise'
           owner_id: string
+          billing_email?: string | null
+          tax_type?: string | null
+          tax_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -34,28 +40,31 @@ export interface Database {
           url_slug?: string
           plan_tier?: 'free' | 'starter' | 'pro' | 'enterprise'
           owner_id?: string
+          billing_email?: string | null
+          tax_type?: string | null
+          tax_id?: string | null
           created_at?: string
           updated_at?: string
         }
       }
-      workspace_members: {
+      project_members: {
         Row: {
           id: string
-          workspace_id: string
+          project_id: string
           user_id: string
           role: 'owner' | 'admin' | 'member'
           joined_at: string
         }
         Insert: {
           id?: string
-          workspace_id: string
+          project_id: string
           user_id: string
           role?: 'owner' | 'admin' | 'member'
           joined_at?: string
         }
         Update: {
           id?: string
-          workspace_id?: string
+          project_id?: string
           user_id?: string
           role?: 'owner' | 'admin' | 'member'
           joined_at?: string
@@ -93,7 +102,7 @@ export interface Database {
       agents: {
         Row: {
           id: string
-          workspace_id: string
+          project_id: string
           name: string
           description: string | null
           avatar_url: string | null
@@ -104,12 +113,16 @@ export interface Database {
           status: 'draft' | 'training' | 'ready' | 'error'
           last_trained_at: string | null
           config: Json
+          created_by: string
+          total_sources: number
+          total_size_kb: number
+          welcome_message: string | null
           created_at: string
           updated_at: string
         }
         Insert: {
           id?: string
-          workspace_id: string
+          project_id: string
           name: string
           description?: string | null
           avatar_url?: string | null
@@ -120,12 +133,16 @@ export interface Database {
           status?: 'draft' | 'training' | 'ready' | 'error'
           last_trained_at?: string | null
           config?: Json
+          created_by?: string
+          total_sources?: number
+          total_size_kb?: number
+          welcome_message?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
           id?: string
-          workspace_id?: string
+          project_id?: string
           name?: string
           description?: string | null
           avatar_url?: string | null
@@ -136,6 +153,10 @@ export interface Database {
           status?: 'draft' | 'training' | 'ready' | 'error'
           last_trained_at?: string | null
           config?: Json
+          created_by?: string
+          total_sources?: number
+          total_size_kb?: number
+          welcome_message?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -144,30 +165,42 @@ export interface Database {
         Row: {
           id: string
           agent_id: string
+          project_id: string
           type: 'website' | 'file' | 'text' | 'qa' | 'fb_export'
           name: string
-          config: Json
+          content: string | null
+          website_url: string | null
+          size_kb: number
           status: string
+          metadata: Json | null
           created_at: string
           updated_at: string
         }
         Insert: {
           id?: string
           agent_id: string
+          project_id: string
           type: 'website' | 'file' | 'text' | 'qa' | 'fb_export'
           name: string
-          config?: Json
+          content?: string | null
+          website_url?: string | null
+          size_kb?: number
           status?: string
+          metadata?: Json | null
           created_at?: string
           updated_at?: string
         }
         Update: {
           id?: string
           agent_id?: string
+          project_id?: string
           type?: 'website' | 'file' | 'text' | 'qa' | 'fb_export'
           name?: string
-          config?: Json
+          content?: string | null
+          website_url?: string | null
+          size_kb?: number
           status?: string
+          metadata?: Json | null
           created_at?: string
           updated_at?: string
         }
@@ -205,6 +238,7 @@ export interface Database {
         Row: {
           id: string
           agent_id: string
+          project_id: string
           session_id: string
           channel: string
           location: Json | null
@@ -214,6 +248,7 @@ export interface Database {
         Insert: {
           id?: string
           agent_id: string
+          project_id: string
           session_id: string
           channel?: string
           location?: Json | null
@@ -223,6 +258,7 @@ export interface Database {
         Update: {
           id?: string
           agent_id?: string
+          project_id?: string
           session_id?: string
           channel?: string
           location?: Json | null
@@ -234,6 +270,8 @@ export interface Database {
         Row: {
           id: string
           conversation_id: string
+          agent_id: string
+          project_id: string
           role: 'user' | 'assistant' | 'system'
           content: string
           metadata: Json
@@ -243,6 +281,8 @@ export interface Database {
         Insert: {
           id?: string
           conversation_id: string
+          agent_id: string
+          project_id: string
           role: 'user' | 'assistant' | 'system'
           content: string
           metadata?: Json
@@ -252,6 +292,8 @@ export interface Database {
         Update: {
           id?: string
           conversation_id?: string
+          agent_id?: string
+          project_id?: string
           role?: 'user' | 'assistant' | 'system'
           content?: string
           metadata?: Json
@@ -314,36 +356,133 @@ export interface Database {
           created_at?: string
         }
       }
-      usage: {
+      usage_logs: {
         Row: {
           id: string
-          workspace_id: string
+          project_id: string
           agent_id: string | null
+          conversation_id: string | null
+          type: string
+          model: string
+          action: string
           credits_used: number
-          tokens_used: number
-          date: string
+          input_tokens: number
+          output_tokens: number
+          total_tokens: number
+          cost_usd: number
+          created_at: string
         }
         Insert: {
           id?: string
-          workspace_id: string
+          project_id: string
           agent_id?: string | null
+          conversation_id?: string | null
+          type: string
+          model: string
+          action: string
           credits_used?: number
-          tokens_used?: number
-          date?: string
+          input_tokens?: number
+          output_tokens?: number
+          total_tokens?: number
+          cost_usd?: number
+          created_at?: string
         }
         Update: {
           id?: string
-          workspace_id?: string
+          project_id?: string
           agent_id?: string | null
+          conversation_id?: string | null
+          type?: string
+          model?: string
+          action?: string
           credits_used?: number
-          tokens_used?: number
-          date?: string
+          input_tokens?: number
+          output_tokens?: number
+          total_tokens?: number
+          cost_usd?: number
+          created_at?: string
+        }
+      }
+      billing_history: {
+        Row: {
+          id: string
+          project_id: string
+          invoice_number: string
+          amount: number
+          currency: string
+          status: string
+          payment_method: string | null
+          description: string | null
+          metadata: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          project_id: string
+          invoice_number: string
+          amount: number
+          currency?: string
+          status?: string
+          payment_method?: string | null
+          description?: string | null
+          metadata?: Json | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          project_id?: string
+          invoice_number?: string
+          amount?: number
+          currency?: string
+          status?: string
+          payment_method?: string | null
+          description?: string | null
+          metadata?: Json | null
+          created_at?: string
+        }
+      }
+      payment_methods: {
+        Row: {
+          id: string
+          project_id: string
+          type: string
+          last4: string
+          brand: string | null
+          exp_month: number | null
+          exp_year: number | null
+          is_default: boolean
+          metadata: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          project_id: string
+          type: string
+          last4: string
+          brand?: string | null
+          exp_month?: number | null
+          exp_year?: number | null
+          is_default?: boolean
+          metadata?: Json | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          project_id?: string
+          type?: string
+          last4?: string
+          brand?: string | null
+          exp_month?: number | null
+          exp_year?: number | null
+          is_default?: boolean
+          metadata?: Json | null
+          created_at?: string
         }
       }
       subscriptions: {
         Row: {
           id: string
-          workspace_id: string
+          project_id: string
           plan_tier: 'free' | 'starter' | 'pro' | 'enterprise'
           status: string
           credits_limit: number
@@ -358,7 +497,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          workspace_id: string
+          project_id: string
           plan_tier?: 'free' | 'starter' | 'pro' | 'enterprise'
           status?: string
           credits_limit?: number
@@ -373,7 +512,7 @@ export interface Database {
         }
         Update: {
           id?: string
-          workspace_id?: string
+          project_id?: string
           plan_tier?: 'free' | 'starter' | 'pro' | 'enterprise'
           status?: string
           credits_limit?: number

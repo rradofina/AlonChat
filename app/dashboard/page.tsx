@@ -13,32 +13,32 @@ export default async function DashboardPage() {
     redirect('/login')
   }
 
-  // Get user's workspace
-  const { data: workspaces } = await supabase
-    .from('workspaces')
+  // Get user's project
+  const { data: projects } = await supabase
+    .from('projects')
     .select('*')
     .eq('owner_id', user.id)
     .order('created_at', { ascending: false })
     .limit(1)
 
-  const workspace = workspaces?.[0]
+  const project = projects?.[0]
 
-  if (!workspace) {
+  if (!project) {
     redirect('/onboarding')
   }
 
-  // Get agents in the workspace
+  // Get agents in the project
   const { data: agents } = await supabase
     .from('agents')
     .select('*')
-    .eq('workspace_id', workspace.id)
+    .eq('project_id', project.id)
     .order('created_at', { ascending: false })
 
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Agents</h1>
-        <NewAgentButton workspaceId={workspace.id} />
+        <NewAgentButton projectId={project.id} />
       </div>
 
       {agents && agents.length > 0 ? (
@@ -72,7 +72,7 @@ export default async function DashboardPage() {
           <p className="text-gray-600 text-center mb-8 max-w-md">
             Create your first AI Agent to start automating support, generating leads, and answering customer questions.
           </p>
-          <NewAgentButton workspaceId={workspace.id} />
+          <NewAgentButton projectId={project.id} />
         </div>
       )}
     </div>
