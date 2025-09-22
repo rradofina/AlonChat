@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { AgentCard } from '@/components/agents/agent-card'
 import { NewAgentButton } from '@/components/agents/new-agent-button'
+import { Bot } from 'lucide-react'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -61,5 +62,3 @@ export default async function DashboardPage() {
     </div>
   )
 }
-
-import { Bot } from 'lucide-react'
