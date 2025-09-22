@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { AgentCard } from '@/components/agents/agent-card'
 import { NewAgentButton } from '@/components/agents/new-agent-button'
-import { Bot } from 'lucide-react'
+import { Bot, Plus } from 'lucide-react'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -49,12 +49,28 @@ export default async function DashboardPage() {
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-12">
-          <Bot className="h-12 w-12 text-gray-400 mb-4" />
-          <h2 className="text-lg font-medium text-gray-900 mb-2">
-            No agents yet
+          {/* Colorful gradient cards illustration */}
+          <div className="relative mb-8">
+            <div className="absolute inset-0 bg-gradient-to-r from-orange-400 via-yellow-400 to-pink-400 opacity-20 blur-3xl" />
+            <div className="relative flex gap-4">
+              <div className="w-32 h-40 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-lg transform rotate-[-8deg] shadow-lg">
+                <div className="p-4">
+                  <Plus className="h-6 w-6 text-white bg-black/20 rounded-full p-1" />
+                </div>
+              </div>
+              <div className="w-32 h-40 bg-gradient-to-br from-yellow-400 to-pink-400 rounded-lg transform rotate-[8deg] shadow-lg">
+                <div className="p-4">
+                  <Plus className="h-6 w-6 text-white bg-black/20 rounded-full p-1" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <h2 className="text-2xl font-semibold text-gray-900 mb-2">
+            No agents yet..
           </h2>
-          <p className="text-gray-500 text-center mb-6 max-w-md">
-            Create your first AI agent to start building intelligent chatbots for your business.
+          <p className="text-gray-600 text-center mb-8 max-w-md">
+            Create your first AI Agent to start automating support, generating leads, and answering customer questions.
           </p>
           <NewAgentButton workspaceId={workspace.id} />
         </div>
