@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { aiService } from '@/lib/ai/ai-service'
+import { chatWithProjectCredentials } from '@/lib/ai/server-utils'
 import { ChatMessage } from '@/lib/ai/providers/base'
 import { z } from 'zod'
 
@@ -152,14 +152,15 @@ export async function POST(
       })
     }
 
-    // Call AI service
+    // Call AI service with project-specific credentials
     let response = ''
     let tokensUsed = 0
     let costUsd = 0
     const modelName = agent.model || 'gemini-1.5-flash'
 
     try {
-      const result = await aiService.chat(
+      const result = await chatWithProjectCredentials(
+        agent.project_id,
         modelName,
         messages,
         {
