@@ -17,10 +17,11 @@ export default function SecurityPage() {
 
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-semibold text-gray-900 mb-8">Security</h1>
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-2xl font-semibold text-gray-900 mb-8">Security</h1>
 
-      {/* Visibility Section */}
-      <div className="bg-white border border-gray-200 rounded-lg mb-8">
+        {/* Visibility Section */}
+        <div className="bg-white border border-gray-200 rounded-lg shadow-sm mb-8">
         <div className="p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-2">Visibility</h2>
           <p className="text-sm text-gray-600 mb-6">
@@ -146,8 +147,8 @@ export default function SecurityPage() {
         </div>
       </div>
 
-      {/* Rate Limit Section */}
-      <div className="bg-white border border-gray-200 rounded-lg">
+        {/* Rate Limit Section */}
+        <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
         <div className="p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-2">Rate limit</h2>
           <p className="text-sm text-gray-600 mb-6">
@@ -200,6 +201,7 @@ export default function SecurityPage() {
               Save
             </Button>
           </div>
+        </div>
         </div>
       </div>
     </div>

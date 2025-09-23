@@ -71,7 +71,7 @@ export function DynamicSidebar() {
     if (pathname.includes('/sources/')) {
       setSourcesExpanded(true)
     }
-    if (pathname.includes('/settings/')) {
+    if (pathname.includes('/settings')) {
       setSettingsExpanded(true)
     }
   }, [pathname])

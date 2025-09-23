@@ -74,8 +74,9 @@ export default function IntegrationsPage() {
 
   return (
     <div className="p-8">
-      {/* Search Bar */}
-      <div className="mb-8">
+      <div className="max-w-6xl mx-auto">
+        {/* Search Bar */}
+        <div className="mb-8">
         <div className="relative max-w-2xl">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
           <Input
@@ -115,6 +116,7 @@ export default function IntegrationsPage() {
             </div>
           </div>
         ))}
+        </div>
       </div>
     </div>
   )
