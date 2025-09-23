@@ -209,16 +209,14 @@ export default function AdminModelsPage() {
           </div>
           <div className="flex gap-4">
             <Button
-              variant="outline"
-              className="text-white border-white hover:bg-red-700"
+              className="bg-red-700 text-white hover:bg-red-800 border-red-800"
               onClick={() => window.location.href = '/admin/providers'}
             >
               <Settings className="h-4 w-4 mr-2" />
               Manage Providers
             </Button>
             <Button
-              variant="outline"
-              className="text-white border-white hover:bg-red-700"
+              className="bg-red-700 text-white hover:bg-red-800 border-red-800"
               onClick={() => window.location.href = '/dashboard'}
             >
               Back to Dashboard

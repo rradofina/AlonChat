@@ -189,16 +189,14 @@ export default function AdminProvidersPage() {
           </div>
           <div className="flex gap-4">
             <Button
-              variant="outline"
-              className="text-white border-white hover:bg-purple-700"
+              className="bg-purple-700 text-white hover:bg-purple-800 border-purple-800"
               onClick={() => window.location.href = '/admin/models'}
             >
               <Database className="h-4 w-4 mr-2" />
               Manage Models
             </Button>
             <Button
-              variant="outline"
-              className="text-white border-white hover:bg-purple-700"
+              className="bg-purple-700 text-white hover:bg-purple-800 border-purple-800"
               onClick={() => window.location.href = '/dashboard'}
             >
               <ArrowLeft className="h-4 w-4 mr-2" />

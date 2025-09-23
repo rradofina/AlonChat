@@ -155,11 +155,6 @@ export function DashboardHeader({ projectName, agentName }: DashboardHeaderProps
               Dashboard
             </DropdownMenuItem>
 
-            <DropdownMenuItem onClick={() => router.push('/dashboard/settings/api-keys')}>
-              <Key className="mr-2 h-4 w-4" />
-              API Keys
-            </DropdownMenuItem>
-
             <DropdownMenuItem onClick={() => router.push('/dashboard/settings')}>
               <Settings className="mr-2 h-4 w-4" />
               Account settings
@@ -171,6 +166,11 @@ export function DashboardHeader({ projectName, agentName }: DashboardHeaderProps
             <div className="px-2 py-1.5">
               <span className="text-xs text-gray-500 uppercase tracking-wider">Admin (Dev Only)</span>
             </div>
+
+            <DropdownMenuItem onClick={() => router.push('/dashboard/settings/api-keys')}>
+              <Key className="mr-2 h-4 w-4 text-blue-600" />
+              <span className="text-blue-600">API Keys</span>
+            </DropdownMenuItem>
 
             <DropdownMenuItem onClick={() => router.push('/admin/models')}>
               <Database className="mr-2 h-4 w-4 text-red-600" />
