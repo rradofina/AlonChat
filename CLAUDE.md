@@ -1,5 +1,12 @@
 # CLAUDE.md - Important Project Guidelines
 
+## IMPORTANT: Persistent Issues Tracking
+**Check PERSISTENT_ISSUES.md for recurring problems and their solutions**
+- If encountering an issue multiple times, document it in PERSISTENT_ISSUES.md
+- Always check PERSISTENT_ISSUES.md first when debugging known issues
+- Update PERSISTENT_ISSUES.md when finding new solutions to recurring problems
+- This is especially important after git resets or when reverting to earlier commits
+
 ## CRITICAL: Database Structure Requirements
 
 ### Project ID vs Workspace ID
@@ -17,6 +24,14 @@ The project has been refactored from using `workspace_id` to `project_id`. This 
 - `agents` table: Has `project_id` (NOT workspace_id)
 - `sources` table: Has `project_id` (NOT workspace_id)
 - All agent-related data uses `project_id` for relationships
+
+## Development Environment
+
+### Port Configuration
+**IMPORTANT: ALWAYS USE PORT 3000**
+- This project exclusively uses `localhost:3000` for development
+- If there are issues on port 3000 and a reset is needed, resolve the port 3000 issue
+- DO NOT use alternative ports - always fix and use port 3000
 
 ## Code Quality Standards
 

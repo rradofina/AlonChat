@@ -2,22 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'next/navigation'
-import { Upload, FileText, AlertCircle, Loader2, Trash2, X, RotateCw, ChevronRight, Calendar, HardDrive } from 'lucide-react'
+import { Upload, FileText, AlertCircle, Loader2, Trash2, ChevronRight, X, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
 import SourcesSidebar from '@/components/agents/sources-sidebar'
 import { FloatingActionBar } from '@/components/ui/floating-action-bar'
 import { Checkbox } from '@/components/ui/checkbox'
 import { FileViewer } from '@/components/agents/file-viewer'
-
-interface UploadingFile {
-  id: string
-  name: string
-  status: 'uploading' | 'error' | 'success'
-  error?: string
-  progress?: number
-  file?: File
-}
+import { UploadStatusModal, type UploadingFile } from '@/components/ui/upload-status-modal'
 
 export default function FilesPage() {
   const params = useParams()
@@ -30,9 +22,10 @@ export default function FilesPage() {
   const [isUploading, setIsUploading] = useState(false)
   const [totalSize, setTotalSize] = useState(0)
   const [selectedFiles, setSelectedFiles] = useState<string[]>([])
-  const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([])
+  const [uploadingFiles, setUploadingFiles] = useState<(UploadingFile & { file?: File })[]>([])
   const [selectedFile, setSelectedFile] = useState<any>(null)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const processingQueueRef = useRef(false)
 
   // Fetch files on mount and setup auto-refresh
   useEffect(() => {
@@ -99,29 +92,12 @@ export default function FilesPage() {
   const handleFileUpload = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return
 
-    const allowedTypes = ['.pdf', '.doc', '.docx', '.txt']
-    const allowedMimeTypes = [
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'text/plain'
-    ]
+    const newUploadingFiles: (UploadingFile & { file?: File })[] = []
+    let position = uploadingFiles.length + 1
 
-    const newUploadingFiles: UploadingFile[] = []
-    const validFiles: File[] = []
-
-    // Validate files
+    // Validate and prepare files for queue
     Array.from(fileList).forEach(file => {
       const fileName = file.name.toLowerCase()
-      const fileExt = '.' + file.name.split('.').pop()?.toLowerCase()
-
-      // Log for debugging
-      console.log('File validation:', {
-        name: file.name,
-        type: file.type,
-        ext: fileExt,
-        size: file.size
-      })
 
       // Check by extension - most reliable method
       const hasValidExtension = fileName.endsWith('.pdf') ||
@@ -129,23 +105,14 @@ export default function FilesPage() {
                                 fileName.endsWith('.docx') ||
                                 fileName.endsWith('.txt')
 
-      // Also check MIME type as backup
-      const hasValidMimeType = file.type === 'application/pdf' ||
-                               file.type === 'application/msword' ||
-                               file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-                               file.type === 'text/plain' ||
-                               file.type === '' // Some systems don't set MIME type
-
-      const isValidType = hasValidExtension // Rely primarily on extension
-
-      if (!isValidType) {
+      if (!hasValidExtension) {
         // Add to error list
         newUploadingFiles.push({
           id: crypto.randomUUID(),
           name: file.name,
           status: 'error',
           error: 'File must be PDF, DOC, DOCX, or TXT',
-          file: file
+          position: position++
         })
       } else if (file.size > 30 * 1024 * 1024) {
         // File too large
@@ -154,38 +121,52 @@ export default function FilesPage() {
           name: file.name,
           status: 'error',
           error: `File exceeds 30MB limit`,
-          file: file
+          position: position++
         })
       } else {
-        // Valid file
-        const uploadId = crypto.randomUUID()
-        validFiles.push(file)
+        // Valid file - add to queue
         newUploadingFiles.push({
-          id: uploadId,
+          id: crypto.randomUUID(),
           name: file.name,
-          status: 'uploading',
-          file: file
+          status: 'waiting',
+          position: position++,
+          // Store file in metadata for processing
+          file
         })
       }
     })
 
+    // Add files to upload queue
     setUploadingFiles(prev => [...prev, ...newUploadingFiles])
+  }
 
-    if (validFiles.length === 0) {
-      return
-    }
-
+  // Process the upload queue
+  const processUploadQueue = async () => {
+    if (processingQueueRef.current) return
+    processingQueueRef.current = true
     setIsUploading(true)
 
-    // Upload valid files
-    for (const file of validFiles) {
-      const formData = new FormData()
-      formData.append('files', file)
+    while (true) {
+      // Get current state to find next waiting file
+      let nextFile: (UploadingFile & { file?: File }) | undefined
+      setUploadingFiles(current => {
+        nextFile = current.find(f => f.status === 'waiting' && f.file)
+        return current
+      })
 
-      const uploadingFile = newUploadingFiles.find(f => f.file === file)
-      if (!uploadingFile) continue
+      if (!nextFile || !nextFile.file) {
+        break
+      }
+
+      // Update status to uploading
+      setUploadingFiles(prev => prev.map(f =>
+        f.id === nextFile!.id ? { ...f, status: 'uploading' } : f
+      ))
 
       try {
+        const formData = new FormData()
+        formData.append('files', nextFile.file!)
+
         const response = await fetch(`/api/agents/${params.id}/sources/files`, {
           method: 'POST',
           body: formData,
@@ -197,16 +178,22 @@ export default function FilesPage() {
           throw new Error(data.error || 'Failed to upload file')
         }
 
+        // Update status to processing
+        setUploadingFiles(prev => prev.map(f =>
+          f.id === nextFile!.id ? { ...f, status: 'processing' } : f
+        ))
+
+        // Simulate processing time
+        await new Promise(resolve => setTimeout(resolve, 2000))
+
         // Update status to success
         setUploadingFiles(prev => prev.map(f =>
-          f.id === uploadingFile.id
-            ? { ...f, status: 'success' }
-            : f
+          f.id === nextFile!.id ? { ...f, status: 'success' } : f
         ))
 
         // Remove successful uploads after delay
         setTimeout(() => {
-          setUploadingFiles(prev => prev.filter(f => f.id !== uploadingFile.id))
+          setUploadingFiles(prev => prev.filter(f => f.id !== nextFile!.id))
         }, 3000)
 
         setShowRetrainingAlert(true)
@@ -214,7 +201,7 @@ export default function FilesPage() {
       } catch (error: any) {
         // Update status to error
         setUploadingFiles(prev => prev.map(f =>
-          f.id === uploadingFile.id
+          f.id === nextFile!.id
             ? { ...f, status: 'error', error: error.message || 'Failed to upload' }
             : f
         ))
@@ -222,25 +209,26 @@ export default function FilesPage() {
     }
 
     setIsUploading(false)
+    processingQueueRef.current = false
     await fetchFiles() // Refresh the file list
   }
 
-  const retryUpload = (uploadId: string) => {
-    const uploadingFile = uploadingFiles.find(f => f.id === uploadId)
-    if (!uploadingFile?.file) return
+  // Add effect to process queue when files are added
+  useEffect(() => {
+    const hasWaitingFiles = uploadingFiles.some(f => f.status === 'waiting')
+    if (hasWaitingFiles && !processingQueueRef.current) {
+      processUploadQueue()
+    }
+  }, [uploadingFiles])
 
-    const newFileList = new DataTransfer()
-    newFileList.items.add(uploadingFile.file)
-
-    // Remove from error list
-    setUploadingFiles(prev => prev.filter(f => f.id !== uploadId))
-
-    // Retry upload
-    handleFileUpload(newFileList.files)
+  const retryUpload = (fileId: string) => {
+    setUploadingFiles(prev => prev.map(f =>
+      f.id === fileId ? { ...f, status: 'waiting' as const } : f
+    ))
   }
 
-  const removeUpload = (uploadId: string) => {
-    setUploadingFiles(prev => prev.filter(f => f.id !== uploadId))
+  const removeFromQueue = (fileId: string) => {
+    setUploadingFiles(prev => prev.filter(f => f.id !== fileId))
   }
 
   const handleDeleteSelected = async () => {
@@ -518,77 +506,13 @@ export default function FilesPage() {
         refreshTrigger={refreshTrigger}
       />
 
-      {/* Upload Status Bar - Fixed at bottom */}
-      {uploadingFiles.length > 0 && (
-        <div className="fixed bottom-0 right-0 left-0 bg-gray-900 text-white shadow-lg z-50">
-          <div className="max-w-7xl mx-auto px-4 py-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <span className="text-sm font-medium">
-                  Uploading {uploadingFiles.filter(f => f.status === 'uploading').length}/
-                  {uploadingFiles.length} files
-                </span>
-                {uploadingFiles.filter(f => f.status === 'uploading').length > 0 && (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                )}
-              </div>
-              <button
-                onClick={() => setUploadingFiles([])}
-                className="text-gray-400 hover:text-white"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* File upload items */}
-            <div className="mt-2 space-y-2 max-h-48 overflow-y-auto">
-              {uploadingFiles.map((file) => (
-                <div
-                  key={file.id}
-                  className="flex items-center justify-between bg-gray-800 rounded px-3 py-2"
-                >
-                  <div className="flex items-center gap-3 flex-1">
-                    {file.status === 'uploading' && (
-                      <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
-                    )}
-                    {file.status === 'error' && (
-                      <AlertCircle className="h-4 w-4 text-red-400" />
-                    )}
-                    {file.status === 'success' && (
-                      <FileText className="h-4 w-4 text-green-400" />
-                    )}
-                    <span className="text-sm truncate flex-1">{file.name}</span>
-                    {file.error && (
-                      <span className="text-xs text-red-400 ml-2">
-                        File must be a PDF or DOCX
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 ml-4">
-                    {file.status === 'error' && (
-                      <>
-                        <button
-                          onClick={() => retryUpload(file.id)}
-                          className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
-                        >
-                          <RotateCw className="h-3 w-3" />
-                          Retry
-                        </button>
-                        <button
-                          onClick={() => removeUpload(file.id)}
-                          className="text-xs text-gray-400 hover:text-white"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Upload Status Modal */}
+      <UploadStatusModal
+        files={uploadingFiles}
+        onClose={() => setUploadingFiles([])}
+        onRetry={retryUpload}
+        onRemove={removeFromQueue}
+      />
 
       {/* Floating Action Bar */}
       <FloatingActionBar

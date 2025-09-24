@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { FileProcessor } from '@/lib/sources/file-processor'
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
+  const params = await props.params
   try {
     const supabase = await createClient()
 
@@ -29,46 +31,53 @@ export async function POST(
     const uploadedSources = []
 
     for (const file of files) {
-      // Insert source record into database
-      const { data: source, error: sourceError } = await supabase
-        .from('sources')
-        .insert({
-          agent_id: params.id,
-          project_id: agent.project_id,
-          type: 'file',
-          name: file.name,
-          size_kb: Math.round(file.size / 1024),
-          status: 'processing', // Start with processing
-          metadata: {
-            file_type: file.type,
-            original_name: file.name
-          }
-        })
-        .select()
-        .single()
+      try {
+        // Process file to extract content
+        const processedFile = await FileProcessor.processFile(file)
 
-      if (!sourceError && source) {
-        // Convert to match frontend expected format
-        uploadedSources.push({
-          id: source.id,
-          agent_id: source.agent_id,
-          type: source.type,
-          name: source.name,
-          size_bytes: source.size_kb * 1024,
-          status: source.status,
-          created_at: source.created_at,
-          metadata: source.metadata
-        })
+        // Insert source record into database with extracted content
+        const { data: source, error: sourceError } = await supabase
+          .from('sources')
+          .insert({
+            agent_id: params.id,
+            project_id: agent.project_id,
+            type: 'file',
+            name: file.name,
+            size_kb: Math.round(file.size / 1024),
+            status: 'ready', // Set to ready since content is extracted
+            content: processedFile.content, // Store extracted content
+            metadata: {
+              file_type: file.type,
+              original_name: file.name,
+              page_count: processedFile.pageCount,
+              pages: processedFile.pages,
+              pdf_metadata: processedFile.metadata
+            }
+          })
+          .select()
+          .single()
 
-        // Simulate file processing (in production, this would be a background job)
-        // After 3 seconds, mark the file as "ready"
-        setTimeout(async () => {
-          const supabase = await createClient()
-          await supabase
-            .from('sources')
-            .update({ status: 'ready' })
-            .eq('id', source.id)
-        }, 3000)
+        if (!sourceError && source) {
+          // Convert to match frontend expected format
+          uploadedSources.push({
+            id: source.id,
+            agent_id: source.agent_id,
+            type: source.type,
+            name: source.name,
+            size_bytes: source.size_kb * 1024,
+            status: source.status,
+            content: source.content,
+            created_at: source.created_at,
+            metadata: source.metadata
+          })
+
+        } else if (sourceError) {
+          console.error('Error saving file source:', sourceError)
+          throw new Error('Failed to save file to database')
+        }
+      } catch (error) {
+        console.error('Error processing file:', file.name, error)
+        // Continue with next file instead of failing entire batch
       }
     }
 
@@ -108,8 +117,9 @@ export async function POST(
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
+  const params = await props.params
   try {
     const supabase = await createClient()
 
@@ -152,8 +162,9 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
+  const params = await props.params
   try {
     const supabase = await createClient()
     const { sourceIds } = await request.json()

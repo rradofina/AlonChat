@@ -114,7 +114,7 @@ export default function AdminModelsPage() {
             is_active: model.is_active,
             sort_order: model.sort_order,
             updated_at: new Date().toISOString()
-          })
+          } as any)
           .eq('id', model.id)
 
         if (error) throw error
@@ -133,7 +133,7 @@ export default function AdminModelsPage() {
             max_tokens: model.max_tokens,
             is_active: model.is_active,
             sort_order: model.sort_order
-          })
+          } as any)
 
         if (error) throw error
         toast.success('Model created successfully')
@@ -182,7 +182,7 @@ export default function AdminModelsPage() {
     try {
       const { error } = await supabase
         .from('ai_models')
-        .update({ is_active: isActive })
+        .update({ is_active: isActive } as any)
         .eq('id', modelId)
 
       if (error) throw error

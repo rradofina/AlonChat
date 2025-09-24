@@ -6,8 +6,9 @@ import { chunkWebsiteContent } from '@/lib/sources/chunker'
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
+  const params = await props.params
   try {
     const supabase = await createClient()
     const { url, crawlSubpages, maxPages } = await request.json()
@@ -115,8 +116,9 @@ export async function POST(
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
+  const params = await props.params
   try {
     const supabase = await createClient()
 
@@ -264,8 +266,9 @@ async function processWebsiteDirectly(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
+  const params = await props.params
   try {
     const supabase = await createClient()
     const body = await request.json()
@@ -478,8 +481,9 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
+  const params = await props.params
   try {
     const supabase = await createClient()
     const { sourceIds } = await request.json()
