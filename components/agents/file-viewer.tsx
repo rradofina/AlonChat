@@ -70,7 +70,7 @@ export function FileViewer({ file, onBack }: FileViewerProps) {
           {/* Content Area */}
           <div className="flex-1 overflow-y-auto bg-gray-50">
             <div className="max-w-4xl mx-auto p-8">
-            {file.content ? (
+              {file.content ? (
               <div className="bg-white rounded-lg shadow-sm border p-8">
                 <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">
                   {file.content}
