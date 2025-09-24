@@ -49,6 +49,7 @@ export function DynamicSidebar() {
   const [sourcesExpanded, setSourcesExpanded] = useState(false)
   const [settingsExpanded, setSettingsExpanded] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [sourceStats, setSourceStats] = useState<any>(null)
 
   const isAgentPage = pathname.includes('/dashboard/agents/')
   const agentId = params.id as string
@@ -87,8 +88,16 @@ export function DynamicSidebar() {
         .then(({ data }) => {
           if (data) setAgent(data)
         })
+
+      // Fetch source statistics if on a sources page
+      if (pathname.includes('/sources')) {
+        fetch(`/api/agents/${agentId}/sources/stats`)
+          .then(res => res.json())
+          .then(data => setSourceStats(data))
+          .catch(console.error)
+      }
     }
-  }, [isAgentPage, agentId])
+  }, [isAgentPage, agentId, pathname])
 
   const handleSignOut = async () => {
     try {
@@ -127,12 +136,32 @@ export function DynamicSidebar() {
     { name: 'Sentiment', href: `/dashboard/agents/${agentId}/analytics/sentiment`, icon: Heart },
   ]
 
-  // Sources subsections
+  // Sources subsections with counts
   const sourcesItems = [
-    { name: 'Files', href: `/dashboard/agents/${agentId}/sources/files`, icon: FileText },
-    { name: 'Text', href: `/dashboard/agents/${agentId}/sources/text`, icon: Type },
-    { name: 'Website', href: `/dashboard/agents/${agentId}/sources/website`, icon: Globe },
-    { name: 'Q&A', href: `/dashboard/agents/${agentId}/sources/qa`, icon: HelpCircle },
+    {
+      name: 'Files',
+      href: `/dashboard/agents/${agentId}/sources/files`,
+      icon: FileText,
+      count: sourceStats?.byType?.files?.count || 0
+    },
+    {
+      name: 'Text',
+      href: `/dashboard/agents/${agentId}/sources/text`,
+      icon: Type,
+      count: sourceStats?.byType?.text?.count || 0
+    },
+    {
+      name: 'Website',
+      href: `/dashboard/agents/${agentId}/sources/website`,
+      icon: Globe,
+      count: sourceStats?.byType?.website?.count || 0
+    },
+    {
+      name: 'Q&A',
+      href: `/dashboard/agents/${agentId}/sources/qa`,
+      icon: HelpCircle,
+      count: sourceStats?.byType?.qa?.count || 0
+    },
   ]
 
   // Settings subsections
@@ -151,7 +180,13 @@ export function DynamicSidebar() {
     { name: 'Playground', href: `/dashboard/agents/${agentId}/playground`, icon: Bot },
     { name: 'Activity', href: `/dashboard/agents/${agentId}/activity`, icon: Activity, hasSubitems: true },
     { name: 'Analytics', href: `/dashboard/agents/${agentId}/analytics`, icon: BarChart3, hasSubitems: true },
-    { name: 'Sources', href: `/dashboard/agents/${agentId}/sources`, icon: FileText, hasSubitems: true },
+    {
+      name: 'Sources',
+      href: `/dashboard/agents/${agentId}/sources`,
+      icon: FileText,
+      hasSubitems: true,
+      badge: sourceStats?.totalSources || 0
+    },
     { name: 'Actions', href: `/dashboard/agents/${agentId}/actions`, icon: Zap },
     { name: 'Contacts', href: `/dashboard/agents/${agentId}/contacts`, icon: Users },
     { name: 'Deploy', href: `/dashboard/agents/${agentId}/deploy`, icon: Rocket },
@@ -194,6 +229,11 @@ export function DynamicSidebar() {
                     >
                       <Icon className="h-5 w-5" />
                       <span className="flex-1 text-left">{item.name}</span>
+                      {'badge' in item && item.badge > 0 && (
+                        <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full mr-1">
+                          {item.badge}
+                        </span>
+                      )}
                       {isExpanded ? (
                         <ChevronDown className="h-4 w-4" />
                       ) : (
@@ -255,7 +295,10 @@ export function DynamicSidebar() {
                               )}
                             >
                               <SubIcon className="h-4 w-4" />
-                              <span>{subitem.name}</span>
+                              <span className="flex-1">{subitem.name}</span>
+                              {subitem.count > 0 && (
+                                <span className="text-xs text-gray-500">{subitem.count}</span>
+                              )}
                             </Link>
                           )
                         })}

@@ -1,18 +1,35 @@
 'use client'
 
-import { useState } from 'react'
-import { RefreshCw, AlertCircle, Plus, HelpCircle } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { AlertCircle, Plus, HelpCircle, Edit, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { useParams } from 'next/navigation'
+import { toast } from '@/components/ui/use-toast'
+import SourcesSidebar from '@/components/agents/sources-sidebar'
+
+interface QASource {
+  id: string
+  question: string
+  answer: string
+  size_bytes: number
+  created_at: string
+}
 
 export default function QAPage() {
+  const params = useParams()
+  const [title, setTitle] = useState('')
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState('')
   const [showRetrainingAlert, setShowRetrainingAlert] = useState(false)
-  const [qaItems, setQaItems] = useState([
-    { id: 1, question: 'Refund Request', questions: 1, status: 'new' }
-  ])
+  const [qaItems, setQaItems] = useState<QASource[]>([])
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
+  const [isLoading, setIsLoading] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editQuestion, setEditQuestion] = useState('')
+  const [editAnswer, setEditAnswer] = useState('')
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   const handleQuestionChange = (value: string) => {
     setQuestion(value)
@@ -28,9 +45,139 @@ export default function QAPage() {
     }
   }
 
-  const handleAddQA = () => {
-    // Handle add Q&A
-    console.log('Adding Q&A:', { question, answer })
+  useEffect(() => {
+    fetchQASources()
+  }, [])
+
+  const fetchQASources = async () => {
+    try {
+      const response = await fetch(`/api/agents/${params.id}/sources/qa`)
+      if (response.ok) {
+        const data = await response.json()
+        setQaItems(data.sources || [])
+      }
+    } catch (error) {
+      console.error('Error fetching Q&A:', error)
+    }
+  }
+
+  const handleAddQA = async () => {
+    if (!question || !answer) {
+      toast({
+        title: 'Error',
+        description: 'Please enter both question and answer',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      const response = await fetch(`/api/agents/${params.id}/sources/qa`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, answer }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setQaItems([...qaItems, data.source])
+        setTitle('')
+        setQuestion('')
+        setAnswer('')
+        setRefreshTrigger(prev => prev + 1)
+        toast({
+          title: 'Success',
+          description: 'Q&A pair added successfully',
+        })
+        setShowRetrainingAlert(true)
+      } else {
+        throw new Error('Failed to add Q&A')
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to add Q&A pair',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleUpdateQA = async (id: string) => {
+    if (!editQuestion || !editAnswer) return
+
+    try {
+      const response = await fetch(`/api/agents/${params.id}/sources/qa`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceId: id,
+          question: editQuestion,
+          answer: editAnswer
+        }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setQaItems(qaItems.map(item =>
+          item.id === id ? data.source : item
+        ))
+        setEditingId(null)
+        setRefreshTrigger(prev => prev + 1)
+        toast({
+          title: 'Success',
+          description: 'Q&A pair updated successfully',
+        })
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to update Q&A pair',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleDeleteItems = async () => {
+    if (selectedItems.size === 0) return
+
+    try {
+      const response = await fetch(`/api/agents/${params.id}/sources/qa`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceIds: Array.from(selectedItems) }),
+      })
+
+      if (response.ok) {
+        setQaItems(qaItems.filter(item => !selectedItems.has(item.id)))
+        setSelectedItems(new Set())
+        setRefreshTrigger(prev => prev + 1)
+        toast({
+          title: 'Success',
+          description: `Deleted ${selectedItems.size} Q&A pair(s)`,
+        })
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to delete Q&A pairs',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleSelectAll = () => {
+    if (selectedItems.size === qaItems.length) {
+      setSelectedItems(new Set())
+    } else {
+      setSelectedItems(new Set(qaItems.map(item => item.id)))
+    }
+  }
+
+  const calculateTotalSize = () => {
+    return qaItems.reduce((total, item) => total + (item.size_bytes || 0), 0)
   }
 
   return (
@@ -65,6 +212,8 @@ export default function QAPage() {
                   <label className="text-sm font-medium text-gray-700 mb-2 block">Title</label>
                   <Input
                     type="text"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
                     placeholder="Ex: Refund requests"
                     className="w-full"
                   />
@@ -98,16 +247,17 @@ export default function QAPage() {
                     className="min-h-[200px] resize-none"
                   />
                   <div className="text-right text-xs text-gray-500 mt-1">
-                    0 B
+                    {new TextEncoder().encode(answer).length} B
                   </div>
                 </div>
 
                 <div className="flex justify-end">
                   <Button
                     onClick={handleAddQA}
+                    disabled={isLoading || !question || !answer}
                     className="bg-gray-900 hover:bg-gray-800 text-white"
                   >
-                    Add Q&A
+                    {isLoading ? 'Adding...' : 'Add Q&A'}
                   </Button>
                 </div>
               </div>
@@ -118,30 +268,118 @@ export default function QAPage() {
           <div className="mt-8">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Q&A sources</h2>
 
-            <div className="flex items-center gap-4 mb-4">
-              <button className="text-sm text-gray-700 hover:text-gray-900">Select all</button>
+            <div className="flex items-center justify-between mb-4">
+              <button
+                onClick={handleSelectAll}
+                className="text-sm text-gray-700 hover:text-gray-900"
+              >
+                {selectedItems.size === qaItems.length ? 'Deselect all' : 'Select all'}
+              </button>
+              {selectedItems.size > 0 && (
+                <Button
+                  onClick={handleDeleteItems}
+                  variant="outline"
+                  size="sm"
+                  className="text-red-600 hover:text-red-700"
+                >
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Delete ({selectedItems.size})
+                </Button>
+              )}
             </div>
 
-            <div className="space-y-4">
-              <div className="bg-white border border-gray-200 rounded-lg">
-                <div className="p-4">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">Refund Request</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">New</span>
-                        <span className="text-xs text-gray-500">99 B · 1 questions</span>
-                      </div>
-                    </div>
-                    <button className="text-gray-400 hover:text-gray-600">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
+            {qaItems.length === 0 ? (
+              <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <p className="text-sm text-gray-500 text-center">No Q&A pairs added yet</p>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-4">
+                {qaItems.map((item) => (
+                  <div key={item.id} className="bg-white border border-gray-200 rounded-lg">
+                    {editingId === item.id ? (
+                      <div className="p-4 space-y-3">
+                        <Input
+                          value={editQuestion}
+                          onChange={(e) => setEditQuestion(e.target.value)}
+                          placeholder="Question"
+                        />
+                        <Textarea
+                          value={editAnswer}
+                          onChange={(e) => setEditAnswer(e.target.value)}
+                          placeholder="Answer"
+                          className="min-h-[100px]"
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => handleUpdateQA(item.id)}
+                            className="bg-gray-900 hover:bg-gray-800 text-white"
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setEditingId(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-4">
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedItems.has(item.id)}
+                            onChange={(e) => {
+                              const newSelected = new Set(selectedItems)
+                              if (e.target.checked) {
+                                newSelected.add(item.id)
+                              } else {
+                                newSelected.delete(item.id)
+                              }
+                              setSelectedItems(newSelected)
+                            }}
+                            className="rounded border-gray-300 mt-1"
+                          />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-gray-900">{item.question}</p>
+                            <p className="text-sm text-gray-600 mt-1">{item.answer}</p>
+                            <div className="flex items-center gap-2 mt-2">
+                              <span className="text-xs text-gray-500">
+                                {item.size_bytes} B · {new Date(item.created_at).toLocaleDateString()}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                setEditingId(item.id)
+                                setEditQuestion(item.question)
+                                setEditAnswer(item.answer)
+                              }}
+                              className="p-1 hover:bg-gray-100 rounded"
+                            >
+                              <Edit className="h-4 w-4 text-gray-400" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedItems(new Set([item.id]))
+                                handleDeleteItems()
+                              }}
+                              className="p-1 hover:bg-gray-100 rounded"
+                            >
+                              <X className="h-4 w-4 text-gray-400" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="flex justify-between items-center mt-4 text-sm text-gray-600">
               <span>Sort by: Default</span>
@@ -151,41 +389,11 @@ export default function QAPage() {
       </div>
 
       {/* Right Sidebar */}
-      <div className="w-96 border-l border-gray-200 bg-gray-50 p-6">
-        <div className="space-y-6">
-          {/* Q&A Count */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-2xl font-bold text-gray-900">1</span>
-              <span className="text-sm text-gray-600">Q&A</span>
-            </div>
-            <div className="text-sm text-gray-500">96 B</div>
-          </div>
-
-          {/* Total Size */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-gray-700">Total size</span>
-              <span className="text-sm text-gray-600">231 KB / 400 KB</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div
-                className="bg-gray-900 h-2 rounded-full"
-                style={{ width: '57.75%' }}
-              />
-            </div>
-          </div>
-
-          {/* Retrain Button */}
-          <Button
-            className="w-full bg-gray-900 hover:bg-gray-800 text-white"
-            onClick={() => {}}
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Retrain agent
-          </Button>
-        </div>
-      </div>
+      <SourcesSidebar
+        agentId={params.id as string}
+        showRetrainingAlert={showRetrainingAlert}
+        refreshTrigger={refreshTrigger}
+      />
     </div>
   )
 }
