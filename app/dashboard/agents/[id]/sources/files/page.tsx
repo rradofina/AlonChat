@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'next/navigation'
-import { Upload, FileText, AlertCircle, Loader2, Trash2, X, RotateCw, ChevronRight, ChevronDown, Calendar, HardDrive } from 'lucide-react'
+import { Upload, FileText, AlertCircle, Loader2, Trash2, X, RotateCw, ChevronRight, Calendar, HardDrive } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
 import SourcesSidebar from '@/components/agents/sources-sidebar'
 import { FloatingActionBar } from '@/components/ui/floating-action-bar'
 import { Checkbox } from '@/components/ui/checkbox'
+import { FileViewer } from '@/components/agents/file-viewer'
 
 interface UploadingFile {
   id: string
@@ -30,8 +31,7 @@ export default function FilesPage() {
   const [totalSize, setTotalSize] = useState(0)
   const [selectedFiles, setSelectedFiles] = useState<string[]>([])
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([])
-  const [expandedFileId, setExpandedFileId] = useState<string | null>(null)
-  const [filePreview, setFilePreview] = useState<{ [key: string]: any }>({})
+  const [selectedFile, setSelectedFile] = useState<any>(null)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   // Fetch files on mount and setup auto-refresh
@@ -299,54 +299,20 @@ export default function FilesPage() {
     handleFileUpload(e.dataTransfer.files)
   }
 
-  const toggleFileExpand = async (fileId: string) => {
-    if (expandedFileId === fileId) {
-      setExpandedFileId(null)
-    } else {
-      setExpandedFileId(fileId)
-      // Fetch file preview if not already loaded
-      if (!filePreview[fileId]) {
-        const file = files.find(f => f.id === fileId)
-        if (file) {
-          // Use actual content from database if available
-          let content = ''
-          let pageCount = 1
-
-          if (file.content) {
-            // Use the actual extracted content from the database
-            content = `${file.name}
-
-Document Preview
-================
-
-${file.content}`
-
-            // Estimate page count based on content length (roughly 3000 chars per page)
-            pageCount = Math.max(1, Math.ceil(file.content.length / 3000))
-          } else {
-            // Fallback if content is not available yet
-            content = `${file.name}
-
-Document Preview
-================
-
-Content is being processed. Please check back in a moment.
-
-File Type: ${file.name.split('.').pop()?.toUpperCase() || 'Unknown'}
-Size: ${formatBytes(file.size_bytes || 0)}
-Status: ${file.status || 'processing'}`
-          }
-
-          setFilePreview(prev => ({
-            ...prev,
-            [fileId]: {
-              content,
-              pageCount
-            }
-          }))
-        }
-      }
+  const openFileViewer = (fileId: string) => {
+    const file = files.find(f => f.id === fileId)
+    if (file) {
+      setSelectedFile(file)
     }
+  }
+
+  const closeFileViewer = () => {
+    setSelectedFile(null)
+  }
+
+  // Show file viewer if a file is selected
+  if (selectedFile) {
+    return <FileViewer file={selectedFile} onBack={closeFileViewer} />
   }
 
   return (
@@ -513,52 +479,15 @@ Status: ${file.status || 'processing'}`
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  toggleFileExpand(file.id)
+                                  openFileViewer(file.id)
                                 }}
                                 className="p-1 hover:bg-gray-100 rounded transition-colors"
                               >
-                                {expandedFileId === file.id ? (
-                                  <ChevronDown className="h-4 w-4 text-gray-500" />
-                                ) : (
-                                  <ChevronRight className="h-4 w-4 text-gray-500" />
-                                )}
+                                <ChevronRight className="h-4 w-4 text-gray-500" />
                               </button>
                             )}
                           </div>
                         </div>
-
-                        {/* Expanded Preview Section */}
-                        {expandedFileId === file.id && filePreview[file.id] && (
-                          <div className="ml-12 mt-2 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                            <div className="flex items-center justify-between mb-3">
-                              <h4 className="text-sm font-semibold text-gray-700">File Preview</h4>
-                              <div className="flex items-center gap-4 text-xs text-gray-500">
-                                <span className="flex items-center gap-1">
-                                  <FileText className="h-3 w-3" />
-                                  {file.name}
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <Calendar className="h-3 w-3" />
-                                  Created: {new Date(file.created_at).toLocaleDateString()}
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <HardDrive className="h-3 w-3" />
-                                  Size: {formatBytes(file.size_bytes || 0)}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="bg-white p-4 rounded border border-gray-200 max-h-96 overflow-y-auto">
-                              <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono">
-                                {filePreview[file.id].content}
-                              </pre>
-                              {filePreview[file.id].pageCount && (
-                                <p className="text-xs text-gray-500 mt-4 pt-4 border-t">
-                                  Page 4 of {filePreview[file.id].pageCount}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        )}
                       </div>
                     ))}
                   </div>
