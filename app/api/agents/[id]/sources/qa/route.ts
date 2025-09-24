@@ -7,11 +7,24 @@ export async function POST(
 ) {
   try {
     const supabase = await createClient()
-    const { question, answer, images } = await request.json()
+    const requestBody = await request.json()
+    const { question, questions, answer, images, title } = requestBody
 
-    if (!question || !answer) {
+    console.log('POST Q&A received:', {
+      title,
+      questionsCount: questions?.length || 0,
+      hasImages: !!images,
+      imagesCount: images?.length || 0,
+      images: images,
+      fullBody: requestBody
+    })
+
+    // Support both single question (backward compat) and questions array
+    const questionsArray = questions || (question ? [question] : [])
+
+    if (!questionsArray.length || !answer) {
       return NextResponse.json(
-        { error: 'Question and answer are required' },
+        { error: 'At least one question and answer are required' },
         { status: 400 }
       )
     }
@@ -28,8 +41,25 @@ export async function POST(
     }
 
     // Calculate size
-    const sizeBytes = new TextEncoder().encode(question + answer).length
+    const sizeBytes = new TextEncoder().encode(questionsArray.join(' ') + answer).length
     const sizeKb = Math.round(sizeBytes / 1024) || 1
+
+    // Use title or first question as name
+    const name = title || questionsArray[0]
+
+    // Prepare metadata with images
+    const metadata = {
+      title: title || questionsArray[0],
+      has_images: images && Array.isArray(images) && images.length > 0,
+      images: images && Array.isArray(images) ? images : []
+    }
+
+    console.log('Preparing to insert Q&A with metadata:', {
+      name,
+      imagesReceived: images,
+      metadataToStore: metadata,
+      imageCount: metadata.images.length
+    })
 
     // Insert Q&A into database
     const { data: source, error: sourceError } = await supabase
@@ -38,34 +68,49 @@ export async function POST(
         agent_id: params.id,
         project_id: agent.project_id,
         type: 'qa',
-        name: question, // Use question as name
-        content: JSON.stringify({ question, answer }), // Store Q&A in content field
+        name: name,
+        content: JSON.stringify({ questions: questionsArray, answer }), // Store as array
         size_kb: sizeKb,
-        status: 'pending',
-        metadata: {
-          has_images: images && images.length > 0,
-          images: images || []
-        }
+        status: 'ready', // Set to ready since Q&A doesn't need processing
+        metadata: metadata
       })
       .select()
       .single()
 
     if (sourceError) {
       console.error('Error creating Q&A:', sourceError)
+      console.error('Failed insert data:', {
+        agent_id: params.id,
+        project_id: agent.project_id,
+        images: images,
+        metadata: {
+          title: title || questionsArray[0],
+          has_images: images && images.length > 0,
+          images: images || []
+        }
+      })
       return NextResponse.json(
-        { error: 'Failed to create Q&A' },
+        { error: 'Failed to create Q&A: ' + sourceError.message },
         { status: 500 }
       )
     }
+
+    console.log('Successfully created Q&A:', {
+      id: source.id,
+      metadata: source.metadata,
+      images_in_metadata: source.metadata?.images
+    })
 
     // Format for frontend
     const formattedSource = {
       id: source.id,
       agent_id: source.agent_id,
       type: 'qa',
-      question: question,
+      title: source.metadata?.title || title || questionsArray[0],
+      question: questionsArray.join(' | '), // Keep for backward compatibility
+      questions: questionsArray, // New array format
       answer: answer,
-      images: images || [],
+      images: source.metadata?.images || images || [],
       size_bytes: sizeBytes,
       status: source.status,
       created_at: source.created_at,
@@ -109,17 +154,33 @@ export async function GET(
 
     // Format for frontend
     const formattedSources = sources.map(source => {
-      let question = source.name
+      let questionsArray = []
       let answer = ''
 
       // Parse Q&A from content field
       if (source.content) {
         try {
           const parsed = JSON.parse(source.content)
-          question = parsed.question || source.name
+
+          // Handle new format (questions array)
+          if (parsed.questions && Array.isArray(parsed.questions)) {
+            questionsArray = parsed.questions
+          }
+          // Handle old format (single question string, might have pipe separators)
+          else if (parsed.question) {
+            questionsArray = parsed.question.includes(' | ')
+              ? parsed.question.split(' | ')
+              : [parsed.question]
+          }
+          // Fallback to name
+          else {
+            questionsArray = [source.name]
+          }
+
           answer = parsed.answer || ''
         } catch (e) {
           // Fallback if parsing fails
+          questionsArray = [source.name]
         }
       }
 
@@ -127,7 +188,9 @@ export async function GET(
         id: source.id,
         agent_id: source.agent_id,
         type: 'qa',
-        question: question,
+        title: source.metadata?.title || source.name || questionsArray[0],
+        question: questionsArray.join(' | '), // Keep for backward compatibility
+        questions: questionsArray, // New array format
         answer: answer,
         images: source.metadata?.images || [],
         size_bytes: source.size_kb * 1024,
@@ -154,29 +217,63 @@ export async function PUT(
 ) {
   try {
     const supabase = await createClient()
-    const { sourceId, question, answer, images } = await request.json()
+    const requestBody = await request.json()
+    const { sourceId, question, questions, answer, images, title } = requestBody
 
-    if (!sourceId || !question || !answer) {
+    console.log('PUT Q&A received:', {
+      sourceId,
+      title,
+      hasImages: !!images,
+      imagesCount: images?.length || 0,
+      images: images
+    })
+
+    // Support both single question (backward compat) and questions array
+    const questionsArray = questions || (question ?
+      (question.includes(' | ') ? question.split(' | ') : [question])
+      : [])
+
+    if (!sourceId || !questionsArray.length || !answer) {
       return NextResponse.json(
-        { error: 'Source ID, question and answer are required' },
+        { error: 'Source ID, at least one question and answer are required' },
         { status: 400 }
       )
     }
 
-    const sizeBytes = new TextEncoder().encode(question + answer).length
+    const sizeBytes = new TextEncoder().encode(questionsArray.join(' ') + answer).length
     const sizeKb = Math.round(sizeBytes / 1024) || 1
+
+    // Get existing metadata to preserve title if not provided
+    const { data: existing } = await supabase
+      .from('sources')
+      .select('metadata')
+      .eq('id', sourceId)
+      .single()
+
+    // Prepare updated metadata
+    const updatedMetadata = {
+      ...existing?.metadata, // Preserve existing metadata
+      title: title || existing?.metadata?.title || questionsArray[0],
+      has_images: images && Array.isArray(images) && images.length > 0,
+      images: images && Array.isArray(images) ? images : (existing?.metadata?.images || [])
+    }
+
+    console.log('Updating Q&A with metadata:', {
+      sourceId,
+      existingImages: existing?.metadata?.images,
+      newImages: images,
+      finalImages: updatedMetadata.images,
+      imageCount: updatedMetadata.images.length
+    })
 
     // Update in database
     const { data: source, error } = await supabase
       .from('sources')
       .update({
-        name: question,
-        content: JSON.stringify({ question, answer }),
+        name: title || questionsArray[0], // Use title or first question as name
+        content: JSON.stringify({ questions: questionsArray, answer }), // Store as array
         size_kb: sizeKb,
-        metadata: {
-          has_images: images && images.length > 0,
-          images: images || []
-        },
+        metadata: updatedMetadata,
         updated_at: new Date().toISOString()
       })
       .eq('id', sourceId)
@@ -197,11 +294,14 @@ export async function PUT(
       id: source.id,
       agent_id: source.agent_id,
       type: 'qa',
-      question: question,
+      title: source.metadata?.title || questionsArray[0],
+      question: questionsArray.join(' | '), // Keep for backward compatibility
+      questions: questionsArray, // New array format
       answer: answer,
-      images: images || [],
+      images: source.metadata?.images || images || [],
       size_bytes: sizeBytes,
       status: source.status,
+      created_at: source.created_at, // Include created_at for date display
       updated_at: source.updated_at,
       metadata: source.metadata
     }

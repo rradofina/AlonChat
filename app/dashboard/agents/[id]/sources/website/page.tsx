@@ -7,6 +7,9 @@ import { Input } from '@/components/ui/input'
 import { useParams } from 'next/navigation'
 import { toast } from '@/components/ui/use-toast'
 import SourcesSidebar from '@/components/agents/sources-sidebar'
+import { CustomSelect } from '@/components/ui/custom-select'
+import { FloatingActionBar } from '@/components/ui/floating-action-bar'
+import { Checkbox } from '@/components/ui/checkbox'
 
 interface SubLink {
   url: string
@@ -450,7 +453,7 @@ export default function WebsitePage() {
                   </>
                 )}
 
-                <div className="pt-2">
+                <div className="pt-2 flex justify-end">
                   <Button
                     onClick={handleFetchLinks}
                     disabled={isLoading || !url}
@@ -469,22 +472,17 @@ export default function WebsitePage() {
 
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-4">
-                <button
-                  onClick={handleSelectAll}
-                  className="text-sm text-gray-700 hover:text-gray-900"
-                >
-                  {selectedSources.size === sources.length ? 'Deselect all' : 'Select all'}
-                </button>
+                <label className="flex items-center gap-2 text-sm text-gray-700 hover:text-gray-900 cursor-pointer">
+                  <Checkbox
+                    checked={selectedSources.size === sources.length && sources.length > 0}
+                    onChange={handleSelectAll}
+                  />
+                  <span>Select all</span>
+                </label>
                 {selectedSources.size > 0 && (
-                  <Button
-                    onClick={handleDeleteSources}
-                    variant="outline"
-                    size="sm"
-                    className="text-red-600 hover:text-red-700"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Delete ({selectedSources.size})
-                  </Button>
+                  <span className="text-sm text-gray-500">
+                    All {selectedSources.size} items on this page are selected
+                  </span>
                 )}
               </div>
 
@@ -499,20 +497,13 @@ export default function WebsitePage() {
                   />
                 </div>
 
-                <div className="flex items-center gap-2 text-sm text-gray-700">
-                  <span>Sort by:</span>
-                  <select
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-gray-700">Sort by:</span>
+                  <CustomSelect
                     value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    className="border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400"
-                  >
-                    <option>Default</option>
-                    <option>Status</option>
-                    <option>Newest</option>
-                    <option>Oldest</option>
-                    <option>Alphabetical (A-Z)</option>
-                    <option>Alphabetical (Z-A)</option>
-                  </select>
+                    onChange={setSortBy}
+                    options={['Default', 'Status', 'Newest', 'Oldest', 'Alphabetical (A-Z)', 'Alphabetical (Z-A)']}
+                  />
                 </div>
               </div>
             </div>
@@ -563,10 +554,9 @@ export default function WebsitePage() {
                     <div key={source.id} className="bg-white border border-gray-200 rounded-lg">
                       <div className="p-4">
                         <div className="flex items-start gap-3">
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={selectedSources.has(source.id)}
-                            onChange={(e) => {
+                            onChange={(e: any) => {
                               const newSelected = new Set(selectedSources)
                               if (e.target.checked) {
                                 newSelected.add(source.id)
@@ -575,7 +565,7 @@ export default function WebsitePage() {
                               }
                               setSelectedSources(newSelected)
                             }}
-                            className="rounded border-gray-300 mt-1"
+                            className="mt-1"
                           />
 
                           {/* Expand/Collapse Button */}
@@ -796,6 +786,12 @@ export default function WebsitePage() {
         agentId={params.id as string}
         showRetrainingAlert={showRetrainingAlert}
         refreshTrigger={refreshTrigger}
+      />
+
+      {/* Floating Action Bar */}
+      <FloatingActionBar
+        selectedCount={selectedSources.size}
+        onDelete={handleDeleteSources}
       />
     </div>
   )

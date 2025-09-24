@@ -59,29 +59,31 @@ export async function getAgentSourceStats(
 }
 
 export async function calculateStorageUsage(
-  workspaceId: string
+  projectId: string
 ): Promise<{ used: number; limit: number; percentage: number }> {
   const supabase = createClient()
-  
-  // Get workspace plan
-  const { data: workspace } = await supabase
-    .from('workspaces')
-    .select('plan')
-    .eq('id', workspaceId)
+
+  // Get project settings for plan info
+  const { data: project } = await supabase
+    .from('projects')
+    .select('settings')
+    .eq('id', projectId)
     .single()
 
-  if (!workspace) {
+  if (!project) {
     return { used: 0, limit: 0, percentage: 0 }
   }
 
-  // Get all agents in workspace
+  const plan = project.settings?.plan || 'free'
+
+  // Get all agents in project
   const { data: agents } = await supabase
     .from('agents')
     .select('id')
-    .eq('workspace_id', workspaceId)
+    .eq('project_id', projectId)
 
   if (!agents || agents.length === 0) {
-    return { used: 0, limit: getStorageLimit(workspace.plan), percentage: 0 }
+    return { used: 0, limit: getStorageLimit(plan), percentage: 0 }
   }
 
   // Get total size of all sources
@@ -92,7 +94,7 @@ export async function calculateStorageUsage(
     .in('agent_id', agentIds)
 
   const used = sources?.reduce((sum, s) => sum + (s.size_bytes || 0), 0) || 0
-  const limit = getStorageLimit(workspace.plan)
+  const limit = getStorageLimit(plan)
   const percentage = limit > 0 ? (used / limit) * 100 : 0
 
   return { used, limit, percentage }
@@ -121,10 +123,10 @@ export function formatBytes(bytes: number): string {
 }
 
 export async function checkStorageQuota(
-  workspaceId: string,
+  projectId: string,
   additionalBytes: number = 0
 ): Promise<{ allowed: boolean; message?: string }> {
-  const usage = await calculateStorageUsage(workspaceId)
+  const usage = await calculateStorageUsage(projectId)
   const newTotal = usage.used + additionalBytes
   
   if (newTotal > usage.limit) {
@@ -149,16 +151,16 @@ export async function validateSourceAccess(
       id,
       agent:agents!inner(
         id,
-        workspace:workspaces!inner(
+        project:projects!inner(
           id,
-          owner_id
+          user_id
         )
       )
     `)
     .eq('id', sourceId)
     .single()
 
-  return data?.agent?.workspace?.owner_id === userId
+  return data?.agent?.project?.user_id === userId
 }
 
 export function getSourceTypeLabel(type: string): string {

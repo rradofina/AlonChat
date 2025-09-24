@@ -6,6 +6,8 @@ import { Upload, FileText, AlertCircle, Loader2, Trash2, X, RotateCw, ChevronRig
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
 import SourcesSidebar from '@/components/agents/sources-sidebar'
+import { FloatingActionBar } from '@/components/ui/floating-action-bar'
+import { Checkbox } from '@/components/ui/checkbox'
 
 interface UploadingFile {
   id: string
@@ -497,31 +499,26 @@ Processing completed successfully.`
           <div className="mt-8">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">File sources</h2>
 
-            {files.length > 0 && (
-              <div className="flex items-center gap-4 mb-4">
-                <button
-                  onClick={() => {
+            <div className="mb-4">
+              <label className="flex items-center gap-2 text-sm text-gray-700 hover:text-gray-900 cursor-pointer">
+                <Checkbox
+                  checked={selectedFiles.length === files.length && files.length > 0}
+                  onChange={() => {
                     if (selectedFiles.length === files.length) {
                       setSelectedFiles([])
                     } else {
                       setSelectedFiles(files.map(f => f.id))
                     }
                   }}
-                  className="text-sm text-gray-700 hover:text-gray-900"
-                >
-                  {selectedFiles.length === files.length ? 'Deselect all' : 'Select all'}
-                </button>
-                {selectedFiles.length > 0 && (
-                  <button
-                    onClick={handleDeleteSelected}
-                    className="text-sm text-red-600 hover:text-red-700 flex items-center gap-1"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                    Delete selected ({selectedFiles.length})
-                  </button>
-                )}
-              </div>
-            )}
+                />
+                <span>Select all</span>
+              </label>
+              {selectedFiles.length > 0 && (
+                <p className="text-sm text-gray-500 mt-2">
+                  All {selectedFiles.length} items on this page are selected
+                </p>
+              )}
+            </div>
 
             <div className="bg-white border border-gray-200 rounded-lg">
               <div className="p-6">
@@ -556,10 +553,9 @@ Processing completed successfully.`
                               }
                             }}
                           >
-                            <input
-                              type="checkbox"
+                            <Checkbox
                               checked={selectedFiles.includes(file.id)}
-                              onChange={(e) => {
+                              onChange={(e: any) => {
                                 e.stopPropagation()
                                 if (e.target.checked) {
                                   setSelectedFiles([...selectedFiles, file.id])
@@ -568,7 +564,6 @@ Processing completed successfully.`
                                 }
                               }}
                               onClick={(e) => e.stopPropagation()}
-                              className="rounded border-gray-300"
                             />
                             <FileText className="h-5 w-5 text-gray-400" />
                             <div className="flex-1">
@@ -734,6 +729,20 @@ Processing completed successfully.`
           </div>
         </div>
       )}
+
+      {/* Floating Action Bar */}
+      <FloatingActionBar
+        selectedCount={selectedFiles.length}
+        onDelete={handleDeleteSelected}
+        showRestore={files.some(f => f.status === 'removed')}
+        onRestore={() => {
+          // Handle restore functionality if needed
+          toast({
+            title: 'Restore',
+            description: 'Restore functionality coming soon'
+          })
+        }}
+      />
     </div>
   )
 }

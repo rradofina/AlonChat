@@ -25,10 +25,23 @@ export default function UsagePage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
+    // Get user's projects first
+    const { data: projects } = await supabase
+      .from('projects')
+      .select('id')
+      .eq('user_id', user.id)
+
+    if (!projects || projects.length === 0) {
+      setLoading(false)
+      return
+    }
+
+    // Get agents from user's projects
+    const projectIds = projects.map(p => p.id)
     const { data } = await supabase
       .from('agents')
       .select('*')
-      .eq('workspace_id', user.id)
+      .in('project_id', projectIds)
 
     if (data) {
       setAgents(data)

@@ -2,12 +2,15 @@
 
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
-import { AlertCircle, Loader2, Trash2, Edit2, Save, X } from 'lucide-react'
+import { AlertCircle, Loader2, Trash2, Edit2, Save, X, MoreHorizontal, Edit } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import SourcesSidebar from '@/components/agents/sources-sidebar'
+import { CustomSelect } from '@/components/ui/custom-select'
+import { FloatingActionBar } from '@/components/ui/floating-action-bar'
+import { Checkbox } from '@/components/ui/checkbox'
 
 export default function TextPage() {
   const params = useParams()
@@ -24,12 +27,29 @@ export default function TextPage() {
   const [editContent, setEditContent] = useState('')
   const [totalSize, setTotalSize] = useState(0)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortBy, setSortBy] = useState('Default')
 
   useEffect(() => {
     if (params.id) {
       fetchTextSources()
     }
   }, [params.id])
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (openDropdown && !(event.target as Element).closest('.dropdown-menu')) {
+        setOpenDropdown(null)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [openDropdown])
 
   const fetchTextSources = async () => {
     try {
@@ -272,31 +292,49 @@ export default function TextPage() {
           <div className="mt-8">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Text sources</h2>
 
-            {textSources.length > 0 && (
-              <div className="flex items-center gap-4 mb-4">
-                <button
-                  onClick={() => {
-                    if (selectedSources.length === textSources.length) {
-                      setSelectedSources([])
-                    } else {
-                      setSelectedSources(textSources.map(s => s.id))
-                    }
-                  }}
-                  className="text-sm text-gray-700 hover:text-gray-900"
-                >
-                  {selectedSources.length === textSources.length ? 'Deselect all' : 'Select all'}
-                </button>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-sm text-gray-700 hover:text-gray-900 cursor-pointer">
+                  <Checkbox
+                    checked={selectedSources.length === textSources.length && textSources.length > 0}
+                    onChange={() => {
+                      if (selectedSources.length === textSources.length) {
+                        setSelectedSources([])
+                      } else {
+                        setSelectedSources(textSources.map(s => s.id))
+                      }
+                    }}
+                  />
+                  <span>Select all</span>
+                </label>
                 {selectedSources.length > 0 && (
-                  <button
-                    onClick={handleDeleteSelected}
-                    className="text-sm text-red-600 hover:text-red-700 flex items-center gap-1"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                    Delete selected ({selectedSources.length})
-                  </button>
+                  <span className="text-sm text-gray-500">
+                    All {selectedSources.length} items on this page are selected
+                  </span>
                 )}
               </div>
-            )}
+
+              <div className="flex items-center gap-4">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-gray-700">Sort by:</span>
+                  <CustomSelect
+                    value={sortBy}
+                    onChange={setSortBy}
+                    options={['Default', 'Newest', 'Oldest', 'Alphabetical (A-Z)', 'Alphabetical (Z-A)', 'Size (Smallest)', 'Size (Largest)']}
+                  />
+                </div>
+              </div>
+            </div>
 
             <div className="bg-white border border-gray-200 rounded-lg">
               <div className="p-6">
@@ -310,7 +348,32 @@ export default function TextPage() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {textSources.map((source) => (
+                    {textSources
+                      .filter(source => {
+                        if (!searchQuery) return true
+                        const searchLower = searchQuery.toLowerCase()
+                        return source.name?.toLowerCase().includes(searchLower) ||
+                               source.content?.toLowerCase().includes(searchLower)
+                      })
+                      .sort((a, b) => {
+                        switch (sortBy) {
+                          case 'Newest':
+                            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                          case 'Oldest':
+                            return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                          case 'Alphabetical (A-Z)':
+                            return (a.name || '').localeCompare(b.name || '')
+                          case 'Alphabetical (Z-A)':
+                            return (b.name || '').localeCompare(a.name || '')
+                          case 'Size (Smallest)':
+                            return (a.size_bytes || 0) - (b.size_bytes || 0)
+                          case 'Size (Largest)':
+                            return (b.size_bytes || 0) - (a.size_bytes || 0)
+                          default:
+                            return 0
+                        }
+                      })
+                      .map((source) => (
                       <div key={source.id}>
                         {editingSource === source.id ? (
                           // Edit mode
@@ -361,10 +424,9 @@ export default function TextPage() {
                             }}
                           >
                             <div className="flex items-center gap-3 flex-1">
-                              <input
-                                type="checkbox"
+                              <Checkbox
                                 checked={selectedSources.includes(source.id)}
-                                onChange={(e) => {
+                                onChange={(e: any) => {
                                   e.stopPropagation()
                                   if (e.target.checked) {
                                     setSelectedSources([...selectedSources, source.id])
@@ -373,7 +435,6 @@ export default function TextPage() {
                                   }
                                 }}
                                 onClick={(e) => e.stopPropagation()}
-                                className="rounded border-gray-300"
                               />
                               <div className="flex-1">
                                 <p className="text-sm font-medium text-gray-900">{source.name}</p>
@@ -390,15 +451,46 @@ export default function TextPage() {
                               }`}>
                                 {source.status || 'pending'}
                               </span>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  startEditing(source)
-                                }}
-                                className="p-1 hover:bg-gray-200 rounded"
-                              >
-                                <Edit2 className="h-4 w-4 text-gray-600" />
-                              </button>
+
+                              {/* Actions Menu */}
+                              <div className="relative dropdown-menu">
+                                <button
+                                  className="p-1 hover:bg-gray-200 rounded"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setOpenDropdown(openDropdown === source.id ? null : source.id)
+                                  }}
+                                >
+                                  <MoreHorizontal className="h-4 w-4 text-gray-600" />
+                                </button>
+                                {openDropdown === source.id && (
+                                  <div className="absolute right-0 mt-2 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        startEditing(source)
+                                        setOpenDropdown(null)
+                                      }}
+                                      className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 flex items-center gap-2"
+                                    >
+                                      <Edit className="h-4 w-4" />
+                                      Edit
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        setSelectedSources([source.id])
+                                        handleDeleteSelected()
+                                        setOpenDropdown(null)
+                                      }}
+                                      className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 text-red-600 flex items-center gap-2"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                      Delete
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         )}
@@ -409,9 +501,11 @@ export default function TextPage() {
               </div>
             </div>
 
-            <div className="flex justify-between items-center mt-4 text-sm text-gray-600">
-              <span>{textSources.length} text snippet(s)</span>
-            </div>
+            {textSources.length > 0 && (
+              <div className="flex justify-between items-center mt-4 text-sm text-gray-600">
+                <span>{textSources.length} text snippet(s)</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -421,6 +515,12 @@ export default function TextPage() {
         agentId={params.id as string}
         showRetrainingAlert={showRetrainingAlert}
         refreshTrigger={refreshTrigger}
+      />
+
+      {/* Floating Action Bar */}
+      <FloatingActionBar
+        selectedCount={selectedSources.length}
+        onDelete={handleDeleteSelected}
       />
     </div>
   )
