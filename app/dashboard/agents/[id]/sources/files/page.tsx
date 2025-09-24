@@ -306,113 +306,35 @@ export default function FilesPage() {
       setExpandedFileId(fileId)
       // Fetch file preview if not already loaded
       if (!filePreview[fileId]) {
-        // Simulate fetching file preview - in production, this would fetch actual content
         const file = files.find(f => f.id === fileId)
         if (file) {
-          // Generate unique preview based on file
-          const fileExt = file.name.split('.').pop()?.toLowerCase()
+          // Use actual content from database if available
           let content = ''
           let pageCount = 1
 
-          if (fileExt === 'pdf') {
-            // Mock PDF content specific to this file
+          if (file.content) {
+            // Use the actual extracted content from the database
             content = `${file.name}
 
 Document Preview
 ================
 
-This is the extracted text content from ${file.name}.
+${file.content}`
 
-Page 1:
--------
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. This document contains important information about ${file.name.replace('.pdf', '').replace(/_/g, ' ').replace(/-/g, ' ')}.
-
-Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
-
-Key Points:
-• Point 1: Important information extracted from the document
-• Point 2: Relevant data and statistics
-• Point 3: Conclusions and recommendations
-
-Page 2:
--------
-Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-
-Table of Contents:
-1. Introduction
-2. Methodology
-3. Results
-4. Discussion
-5. Conclusion
-
-[Additional pages truncated for preview...]`
-            pageCount = Math.floor(Math.random() * 10) + 1
-          } else if (fileExt === 'txt') {
-            // Mock TXT content
-            content = `${file.name}
-
-Plain Text Document
-===================
-
-This is the content of ${file.name}.
-
-The quick brown fox jumps over the lazy dog. This text file contains various information and data that has been processed and indexed for the AI agent.
-
-Content includes:
-- Configuration settings
-- User instructions
-- Reference material
-- Training data
-
-File encoding: UTF-8
-Lines: ${Math.floor(Math.random() * 1000) + 100}
-Words: ${Math.floor(Math.random() * 5000) + 500}
-Characters: ${file.size_bytes || 0}`
-          } else if (fileExt === 'doc' || fileExt === 'docx') {
-            // Mock Word document content
-            content = `${file.name}
-
-Microsoft Word Document
-=======================
-
-Document Title: ${file.name.replace(/\.(doc|docx)$/, '').replace(/_/g, ' ').replace(/-/g, ' ')}
-Author: System User
-Created: ${new Date(file.created_at).toLocaleDateString()}
-
-Abstract:
----------
-This document contains formatted text, tables, and potentially images that have been extracted and processed for the AI agent knowledge base.
-
-Section 1: Introduction
------------------------
-The purpose of this document is to provide comprehensive information about the subject matter. All content has been parsed and indexed for optimal AI agent performance.
-
-Section 2: Main Content
------------------------
-${file.name.includes('guide') ? 'This guide provides step-by-step instructions for...' :
-  file.name.includes('faq') ? 'Frequently Asked Questions and their detailed answers...' :
-  file.name.includes('policy') ? 'This policy document outlines the rules and regulations...' :
-  'This document contains important business information...'}
-
-[Document continues with additional sections...]
-
-Footer: Page 1 of ${Math.floor(Math.random() * 20) + 1}`
-            pageCount = Math.floor(Math.random() * 20) + 1
+            // Estimate page count based on content length (roughly 3000 chars per page)
+            pageCount = Math.max(1, Math.ceil(file.content.length / 3000))
           } else {
-            // Default content for other file types
+            // Fallback if content is not available yet
             content = `${file.name}
 
-File Preview
-============
+Document Preview
+================
 
-File Type: ${fileExt?.toUpperCase() || 'Unknown'}
+Content is being processed. Please check back in a moment.
+
+File Type: ${file.name.split('.').pop()?.toUpperCase() || 'Unknown'}
 Size: ${formatBytes(file.size_bytes || 0)}
-Uploaded: ${new Date(file.created_at).toLocaleString()}
-
-This file has been processed and indexed for the AI agent. The content has been extracted and is available for training and responses.
-
-Status: ${file.status}
-Processing completed successfully.`
+Status: ${file.status || 'processing'}`
           }
 
           setFilePreview(prev => ({

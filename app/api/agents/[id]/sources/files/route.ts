@@ -135,7 +135,8 @@ export async function GET(
       size_bytes: source.size_kb * 1024,
       status: source.status,
       created_at: source.created_at,
-      metadata: source.metadata
+      metadata: source.metadata,
+      content: source.content // Include the actual content for preview
     }))
 
     return NextResponse.json({ sources: formattedSources })
