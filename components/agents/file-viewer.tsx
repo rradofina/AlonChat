@@ -47,27 +47,29 @@ export function FileViewer({ file, onBack }: FileViewerProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-white z-50 flex flex-col">
-      {/* Header */}
-      <div className="border-b px-6 py-4">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors mb-3"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to files
-        </button>
-        <div className="flex items-center gap-3">
-          <FileText className="h-5 w-5 text-gray-400" />
-          <h1 className="text-xl font-semibold text-gray-900">{file.name}</h1>
-        </div>
-      </div>
-
+    <div className="flex h-full">
       {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="border-b px-6 py-4">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors mb-3"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to files
+          </button>
+          <div className="flex items-center gap-3">
+            <FileText className="h-5 w-5 text-gray-400" />
+            <h1 className="text-xl font-semibold text-gray-900">{file.name}</h1>
+          </div>
+        </div>
+
         {/* Document Content */}
-        <div className="flex-1 overflow-y-auto bg-gray-50">
-          <div className="max-w-4xl mx-auto p-8">
+        <div className="flex-1 flex overflow-hidden">
+          {/* Content Area */}
+          <div className="flex-1 overflow-y-auto bg-gray-50">
+            <div className="max-w-4xl mx-auto p-8">
             {file.content ? (
               <div className="bg-white rounded-lg shadow-sm border p-8">
                 <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">
@@ -93,11 +95,11 @@ export function FileViewer({ file, onBack }: FileViewerProps) {
                 </div>
               </div>
             )}
+            </div>
           </div>
-        </div>
 
-        {/* Metadata Sidebar */}
-        <div className="w-80 border-l bg-white p-6 overflow-y-auto">
+          {/* Metadata Sidebar */}
+          <div className="w-80 border-l bg-white p-6 overflow-y-auto">
           <h2 className="text-lg font-semibold text-gray-900 mb-6">Details</h2>
 
           <div className="space-y-5">

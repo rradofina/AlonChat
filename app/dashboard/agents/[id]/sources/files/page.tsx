@@ -312,7 +312,16 @@ export default function FilesPage() {
 
   // Show file viewer if a file is selected
   if (selectedFile) {
-    return <FileViewer file={selectedFile} onBack={closeFileViewer} />
+    return (
+      <div className="flex h-full">
+        <FileViewer file={selectedFile} onBack={closeFileViewer} />
+        <SourcesSidebar
+          agentId={params.id as string}
+          showRetrainingAlert={showRetrainingAlert}
+          refreshTrigger={refreshTrigger}
+        />
+      </div>
+    )
   }
 
   return (
