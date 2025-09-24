@@ -90,7 +90,6 @@ export default function QAPage() {
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
-    console.log('Files selected:', files.length, files.map(f => ({ name: f.name, size: f.size, type: f.type })))
 
     // Validate files
     const validFiles = files.filter(file => {
@@ -113,12 +112,10 @@ export default function QAPage() {
       return true
     })
 
-    console.log('Valid files after validation:', validFiles.length)
 
     if (validFiles.length > 0) {
       const newSelectedImages = [...selectedImages, ...validFiles]
       setSelectedImages(newSelectedImages)
-      console.log('Total selected images:', newSelectedImages.length)
 
       // Create preview URLs
       const newPreviewUrls = validFiles.map(file => URL.createObjectURL(file))
@@ -178,13 +175,6 @@ export default function QAPage() {
           }
         })
 
-        console.log('Fetched Q&A sources:', processedSources)
-        // Log items with images
-        processedSources.forEach((item: any) => {
-          if (item.images && item.images.length > 0) {
-            console.log(`Q&A "${item.title}" has ${item.images.length} images:`, item.images)
-          }
-        })
         setQaItems(processedSources)
       }
     } catch (error) {
@@ -207,25 +197,12 @@ export default function QAPage() {
     setIsLoading(true)
     setIsUploadingImages(true)
 
-    console.log('handleAddQA called with:', {
-      selectedImagesCount: selectedImages.length,
-      selectedImages: selectedImages.map(f => ({ name: f.name, size: f.size })),
-      questionsCount: validQuestions.length,
-      title,
-      answer: answer.substring(0, 50)
-    })
-
     try {
       // Upload images first if any
       let imageUrls: string[] = []
       if (selectedImages.length > 0) {
-        console.log('Starting upload of', selectedImages.length, 'images')
         const uploadResults = await uploadMultipleImages(selectedImages, params.id as string, 'qa')
-        console.log('Upload results:', uploadResults)
         imageUrls = uploadResults.map(result => result.url)
-        console.log('Uploaded images to storage:', imageUrls)
-      } else {
-        console.log('No images to upload')
       }
 
       const requestData = {
@@ -234,7 +211,6 @@ export default function QAPage() {
         title,
         images: imageUrls
       }
-      console.log('Sending Q&A data:', requestData)
 
       const response = await fetch(`/api/agents/${params.id}/sources/qa`, {
         method: 'POST',
@@ -294,14 +270,6 @@ export default function QAPage() {
       // Combine existing and new image URLs
       const allImages = [...editImages, ...newImageUrls]
 
-      console.log('Updating Q&A with:', {
-        sourceId: id,
-        questionsCount: validQuestions.length,
-        existingImages: editImages,
-        newImages: newImageUrls,
-        totalImages: allImages
-      })
-
       const response = await fetch(`/api/agents/${params.id}/sources/qa`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -316,8 +284,6 @@ export default function QAPage() {
 
       if (response.ok) {
         const data = await response.json()
-        console.log('Update response:', data)
-        console.log('Images in response:', data.source?.images)
 
         // Fetch fresh data to ensure images are loaded
         await fetchQASources()
@@ -853,7 +819,6 @@ export default function QAPage() {
                                     setEditTitle(item.title || item.metadata?.title || '')
                                     // Ensure images is an array
                                     const images = Array.isArray(item.images) ? item.images : (item.metadata?.images && Array.isArray(item.metadata.images) ? item.metadata.images : [])
-                                    console.log('Setting edit images:', { itemId: item.id, images, rawImages: item.images, metadataImages: item.metadata?.images })
                                     setEditImages(images)
                                     setEditNewImages([])
                                     setOpenDropdown(null)

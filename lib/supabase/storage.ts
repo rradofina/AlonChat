@@ -14,12 +14,6 @@ export async function uploadImage(
     const fileName = `${timestamp}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`
     const filePath = `${agentId}/${folder}/${fileName}`
 
-    console.log('Uploading image:', {
-      fileName: file.name,
-      fileSize: file.size,
-      fileType: file.type,
-      targetPath: filePath
-    })
 
     // Upload to Supabase storage
     const { data, error } = await supabase.storage
@@ -35,14 +29,12 @@ export async function uploadImage(
       return null
     }
 
-    console.log('Upload successful:', data)
 
     // Get public URL
     const { data: { publicUrl } } = supabase.storage
       .from('agent-sources')
       .getPublicUrl(filePath)
 
-    console.log('Generated public URL:', publicUrl)
 
     return {
       url: publicUrl,

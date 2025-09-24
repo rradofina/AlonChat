@@ -10,14 +10,6 @@ export async function POST(
     const requestBody = await request.json()
     const { question, questions, answer, images, title } = requestBody
 
-    console.log('POST Q&A received:', {
-      title,
-      questionsCount: questions?.length || 0,
-      hasImages: !!images,
-      imagesCount: images?.length || 0,
-      images: images,
-      fullBody: requestBody
-    })
 
     // Support both single question (backward compat) and questions array
     const questionsArray = questions || (question ? [question] : [])
@@ -54,12 +46,6 @@ export async function POST(
       images: images && Array.isArray(images) ? images : []
     }
 
-    console.log('Preparing to insert Q&A with metadata:', {
-      name,
-      imagesReceived: images,
-      metadataToStore: metadata,
-      imageCount: metadata.images.length
-    })
 
     // Insert Q&A into database
     const { data: source, error: sourceError } = await supabase
@@ -95,11 +81,6 @@ export async function POST(
       )
     }
 
-    console.log('Successfully created Q&A:', {
-      id: source.id,
-      metadata: source.metadata,
-      images_in_metadata: source.metadata?.images
-    })
 
     // Format for frontend
     const formattedSource = {
@@ -220,13 +201,6 @@ export async function PUT(
     const requestBody = await request.json()
     const { sourceId, question, questions, answer, images, title } = requestBody
 
-    console.log('PUT Q&A received:', {
-      sourceId,
-      title,
-      hasImages: !!images,
-      imagesCount: images?.length || 0,
-      images: images
-    })
 
     // Support both single question (backward compat) and questions array
     const questionsArray = questions || (question ?
@@ -258,13 +232,6 @@ export async function PUT(
       images: images && Array.isArray(images) ? images : (existing?.metadata?.images || [])
     }
 
-    console.log('Updating Q&A with metadata:', {
-      sourceId,
-      existingImages: existing?.metadata?.images,
-      newImages: images,
-      finalImages: updatedMetadata.images,
-      imageCount: updatedMetadata.images.length
-    })
 
     // Update in database
     const { data: source, error } = await supabase
