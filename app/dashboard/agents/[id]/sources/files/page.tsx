@@ -10,6 +10,9 @@ import { FloatingActionBar } from '@/components/ui/floating-action-bar'
 import { Checkbox } from '@/components/ui/checkbox'
 import { FileViewer } from '@/components/agents/file-viewer'
 import { UploadStatusModal, type UploadingFile } from '@/components/ui/upload-status-modal'
+import { usePagination } from '@/hooks/usePagination'
+import { PaginationControls } from '@/components/ui/pagination-controls'
+import { CustomSelect } from '@/components/ui/custom-select'
 
 export default function FilesPage() {
   const params = useParams()
@@ -25,7 +28,31 @@ export default function FilesPage() {
   const [uploadingFiles, setUploadingFiles] = useState<(UploadingFile & { file?: File })[]>([])
   const [selectedFile, setSelectedFile] = useState<any>(null)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortBy, setSortBy] = useState('Default')
   const processingQueueRef = useRef(false)
+
+  // Use the pagination hook
+  const {
+    currentPage,
+    setCurrentPage,
+    rowsPerPage,
+    setRowsPerPage,
+    totalPages,
+    currentItems: currentFiles,
+    showPagination,
+    goToPage,
+    isFirstPage,
+    isLastPage,
+    itemsRange
+  } = usePagination({
+    items: files,
+    defaultRowsPerPage: 20,
+    visibilityThreshold: 5,
+    rowsPerPageOptions: [5, 10, 25, 50]
+  })
+
+  const allPageSelected = currentFiles.length > 0 && currentFiles.every(file => selectedFiles.includes(file.id))
 
   // Fetch files on mount and setup auto-refresh
   useEffect(() => {
@@ -69,6 +96,7 @@ export default function FilesPage() {
       if (!response.ok) throw new Error('Failed to fetch files')
       const data = await response.json()
       setFiles(data.sources || [])
+      // Pagination hook will automatically reset to page 1 when items change
 
       // Calculate total size
       const total = data.sources?.reduce((sum: number, file: any) => sum + (file.size_bytes || 0), 0) || 0
@@ -83,9 +111,8 @@ export default function FilesPage() {
         })
       }
     } finally {
-      if (showLoader) {
-        setIsLoading(false)
-      }
+      // Always set loading to false after the first fetch
+      setIsLoading(false)
     }
   }
 
@@ -136,90 +163,126 @@ export default function FilesPage() {
       }
     })
 
-    // Add files to upload queue
-    setUploadingFiles(prev => [...prev, ...newUploadingFiles])
+    // Add files to upload queue and trigger processing
+    setUploadingFiles(prev => {
+      const updated = [...prev, ...newUploadingFiles]
+      console.log('Files added to queue:', newUploadingFiles.length, 'Total in queue:', updated.length)
+      return updated
+    })
   }
 
-  // Process the upload queue
-  const processUploadQueue = async () => {
-    if (processingQueueRef.current) return
-    processingQueueRef.current = true
-    setIsUploading(true)
+  // Process upload queue
+  useEffect(() => {
+    if (uploadingFiles.length === 0 || processingQueueRef.current || !params.id) {
+      return
+    }
 
-    while (true) {
-      // Get current state to find next waiting file
-      let nextFile: (UploadingFile & { file?: File }) | undefined
-      setUploadingFiles(current => {
-        nextFile = current.find(f => f.status === 'waiting' && f.file)
-        return current
+    const hasWaiting = uploadingFiles.some(f => f.status === 'waiting' && f.file)
+    if (!hasWaiting) {
+      return
+    }
+
+    const processQueue = async () => {
+      console.log('Starting upload queue processing...', {
+        totalFiles: uploadingFiles.length,
+        waitingFiles: uploadingFiles.filter(f => f.status === 'waiting').length,
+        agentId: params.id
       })
 
-      if (!nextFile || !nextFile.file) {
-        break
-      }
+      processingQueueRef.current = true
+      setIsUploading(true)
 
-      // Update status to uploading
-      setUploadingFiles(prev => prev.map(f =>
-        f.id === nextFile!.id ? { ...f, status: 'uploading' } : f
-      ))
-
-      try {
-        const formData = new FormData()
-        formData.append('files', nextFile.file!)
-
-        const response = await fetch(`/api/agents/${params.id}/sources/files`, {
-          method: 'POST',
-          body: formData,
-        })
-
-        const data = await response.json()
-
-        if (!response.ok) {
-          throw new Error(data.error || 'Failed to upload file')
+      // Process files one by one
+      for (const fileToUpload of uploadingFiles) {
+        if (fileToUpload.status !== 'waiting' || !fileToUpload.file) {
+          continue
         }
 
-        // Update status to processing
+        const fileId = fileToUpload.id
+        const file = fileToUpload.file
+
+        console.log(`Processing file: ${file.name}, size: ${file.size} bytes`)
+
+        // Update to uploading
         setUploadingFiles(prev => prev.map(f =>
-          f.id === nextFile!.id ? { ...f, status: 'processing' } : f
+          f.id === fileId ? { ...f, status: 'uploading' as const } : f
         ))
 
-        // Simulate processing time
-        await new Promise(resolve => setTimeout(resolve, 2000))
+        try {
+          const formData = new FormData()
+          formData.append('files', file)
 
-        // Update status to success
-        setUploadingFiles(prev => prev.map(f =>
-          f.id === nextFile!.id ? { ...f, status: 'success' } : f
-        ))
+          console.log(`Sending POST request to /api/agents/${params.id}/sources/files`)
+          const response = await fetch(`/api/agents/${params.id}/sources/files`, {
+            method: 'POST',
+            body: formData,
+          })
 
-        // Remove successful uploads after delay
-        setTimeout(() => {
-          setUploadingFiles(prev => prev.filter(f => f.id !== nextFile!.id))
-        }, 3000)
+          console.log(`Response status: ${response.status}`)
+          const data = await response.json()
+          console.log('Response data:', data)
 
-        setShowRetrainingAlert(true)
-        setRefreshTrigger(prev => prev + 1)
-      } catch (error: any) {
-        // Update status to error
-        setUploadingFiles(prev => prev.map(f =>
-          f.id === nextFile!.id
-            ? { ...f, status: 'error', error: error.message || 'Failed to upload' }
-            : f
-        ))
+          if (!response.ok) {
+            throw new Error(data.error || 'Failed to upload file')
+          }
+
+          // Check if any files were actually uploaded
+          if (!data.sources || data.sources.length === 0) {
+            console.error('No files were uploaded in the response')
+            throw new Error('File processing failed - no files were saved')
+          }
+
+          // Check if the file has an error status
+          const uploadedFile = data.sources[0]
+          if (uploadedFile.status === 'error') {
+            console.error('File has error status:', uploadedFile.error)
+            throw new Error(uploadedFile.error || 'File processing failed')
+          }
+
+          // Update to processing
+          setUploadingFiles(prev => prev.map(f =>
+            f.id === fileId ? { ...f, status: 'processing' as const } : f
+          ))
+
+          // Simulate processing time
+          await new Promise(resolve => setTimeout(resolve, 1000))
+
+          // Update to success
+          setUploadingFiles(prev => prev.map(f =>
+            f.id === fileId ? { ...f, status: 'success' as const } : f
+          ))
+
+          // Refresh the files list to show the newly uploaded file
+          console.log('Upload successful, refreshing files list...')
+          await fetchFiles(false) // Don't show loading spinner for refresh
+
+          // Remove after delay
+          setTimeout(() => {
+            setUploadingFiles(prev => prev.filter(f => f.id !== fileId))
+          }, 3000)
+
+          setShowRetrainingAlert(true)
+        } catch (error: any) {
+          console.error(`Upload error for ${file.name}:`, error)
+          // Update to error
+          setUploadingFiles(prev => prev.map(f =>
+            f.id === fileId
+              ? { ...f, status: 'error' as const, error: error.message || 'Failed to upload' }
+              : f
+          ))
+        }
       }
+
+      setIsUploading(false)
+      processingQueueRef.current = false
+
+      console.log('Fetching updated files list...')
+      await fetchFiles(false) // Refresh the file list without loader
     }
 
-    setIsUploading(false)
-    processingQueueRef.current = false
-    await fetchFiles() // Refresh the file list
-  }
-
-  // Add effect to process queue when files are added
-  useEffect(() => {
-    const hasWaitingFiles = uploadingFiles.some(f => f.status === 'waiting')
-    if (hasWaitingFiles && !processingQueueRef.current) {
-      processUploadQueue()
-    }
-  }, [uploadingFiles])
+    // Start processing
+    processQueue()
+  }, [uploadingFiles, params.id])
 
   const retryUpload = (fileId: string) => {
     setUploadingFiles(prev => prev.map(f =>
@@ -254,7 +317,7 @@ export default function FilesPage() {
       setSelectedFiles([])
       setShowRetrainingAlert(true)
       setRefreshTrigger(prev => prev + 1)
-      await fetchFiles()
+      await fetchFiles(false)
     } catch (error) {
       toast({
         title: 'Error',
@@ -301,22 +364,15 @@ export default function FilesPage() {
   // Show file viewer if a file is selected
   if (selectedFile) {
     return (
-      <div className="flex h-full">
-        <FileViewer file={selectedFile} onBack={closeFileViewer} />
-        <SourcesSidebar
-          agentId={params.id as string}
-          showRetrainingAlert={showRetrainingAlert}
-          refreshTrigger={refreshTrigger}
-        />
-      </div>
+      <FileViewer file={selectedFile} onBack={closeFileViewer} />
     )
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-full bg-white">
       {/* Main Content Area */}
-      <div className="flex-1 p-8">
-        <div className="max-w-4xl mx-auto">
+      <div className="flex-1 px-8 pt-8 pb-4 bg-white min-h-full overflow-y-auto">
+        <div className="mx-auto w-full max-w-6xl">
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">Files</h1>
           <p className="text-sm text-gray-600 mb-6">
             Upload business documents, guides, or FAQs to train your AI Agent with accurate data.
@@ -336,7 +392,7 @@ export default function FilesPage() {
 
           {/* Upload Section */}
           <div
-            className={`bg-white border-2 ${isDragging ? 'border-gray-400 bg-gray-50' : 'border-gray-200'} border-dashed rounded-lg`}
+            className={`bg-gray-50 border-2 ${isDragging ? 'border-gray-400 bg-gray-100' : 'border-gray-200'} border-dashed rounded-lg`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
@@ -384,50 +440,77 @@ export default function FilesPage() {
           <div className="mt-8">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">File sources</h2>
 
-            <div className="mb-4">
-              <label className="flex items-center gap-2 text-sm text-gray-700 hover:text-gray-900 cursor-pointer">
-                <Checkbox
-                  checked={selectedFiles.length === files.length && files.length > 0}
-                  onChange={() => {
-                    if (selectedFiles.length === files.length) {
-                      setSelectedFiles([])
-                    } else {
-                      setSelectedFiles(files.map(f => f.id))
-                    }
-                  }}
-                />
-                <span>Select all</span>
-              </label>
-              {selectedFiles.length > 0 && (
-                <p className="text-sm text-gray-500 mt-2">
-                  All {selectedFiles.length} items on this page are selected
-                </p>
-              )}
+            {/* Controls row */}
+            <div className="mb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Checkbox
+                    checked={allPageSelected}
+                    onChange={() => {
+                      if (allPageSelected) {
+                        setSelectedFiles(prev => prev.filter(id => !currentFiles.find(file => file.id === id)))
+                      } else {
+                        setSelectedFiles(prev => {
+                          const newIds = currentFiles.map(file => file.id)
+                          return Array.from(new Set([...prev, ...newIds]))
+                        })
+                      }
+                    }}
+                  />
+                  <span className="text-sm text-gray-600">Select all</span>
+                  {selectedFiles.length > 0 && (
+                    <span className="ml-2 text-sm text-gray-500">
+                      {selectedFiles.length} item(s) selected
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Search..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-gray-700">Sort by:</span>
+                    <CustomSelect
+                      value={sortBy}
+                      onChange={setSortBy}
+                      options={['Default', 'Newest', 'Oldest', 'Name (A-Z)', 'Name (Z-A)', 'Size (Smallest)', 'Size (Largest)']}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="bg-white border border-gray-200 rounded-lg">
-              <div className="p-6">
-                {isLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+            {/* Files List - No container, ultra-minimal */}
+            <div>
+              {isLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                </div>
+              ) : currentFiles.length === 0 ? (
+                <div className="flex items-center justify-center text-center py-12">
+                  <div>
+                    <FileText className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                    <p className="text-sm font-medium text-gray-900">No files uploaded</p>
+                    <p className="text-xs text-gray-500 mt-1">Upload files to get started</p>
                   </div>
-                ) : files.length === 0 ? (
-                  <div className="flex items-center justify-center text-center py-8">
-                    <div>
-                      <FileText className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                      <p className="text-sm font-medium text-gray-900">No files uploaded</p>
-                      <p className="text-xs text-gray-500 mt-1">Upload files to get started</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {files.map((file) => (
-                      <div key={file.id}>
-                        <div
-                          className={`flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors ${
-                            selectedFiles.includes(file.id) ? 'bg-gray-50' : ''
-                          }`}
-                        >
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {currentFiles.map((file) => (
+                    <div key={file.id}>
+                      <div
+                        className={`flex items-center justify-between py-3 hover:bg-gray-50 cursor-pointer transition-colors ${
+                          selectedFiles.includes(file.id) ? 'bg-gray-50' : ''
+                        }`}
+                      >
                           <div
                             className="flex items-center gap-3 flex-1"
                             onClick={() => {
@@ -490,21 +573,38 @@ export default function FilesPage() {
                   </div>
                 )}
               </div>
-            </div>
 
-            <div className="flex justify-between items-center mt-4 text-sm text-gray-600">
-              <span>{files.length} file(s)</span>
-            </div>
+            {/* Pagination Controls */}
+            <PaginationControls
+              currentPage={currentPage}
+              totalPages={totalPages}
+              rowsPerPage={rowsPerPage}
+              totalItems={files.length}
+              onPageChange={goToPage}
+              onRowsPerPageChange={(rows) => {
+                setRowsPerPage(rows)
+                // Clear selections when changing page size
+                setSelectedFiles([])
+              }}
+              rowsPerPageOptions={[5, 10, 25, 50]}
+              showPagination={showPagination}
+              itemsRange={itemsRange}
+              isFirstPage={isFirstPage}
+              isLastPage={isLastPage}
+              itemLabel="file"
+            />
           </div>
         </div>
       </div>
 
       {/* Right Sidebar */}
-      <SourcesSidebar
-        agentId={params.id as string}
-        showRetrainingAlert={showRetrainingAlert}
-        refreshTrigger={refreshTrigger}
-      />
+      {!selectedFile && (
+        <SourcesSidebar
+          agentId={params.id as string}
+          showRetrainingAlert={showRetrainingAlert}
+          refreshTrigger={refreshTrigger}
+        />
+      )}
 
       {/* Upload Status Modal */}
       <UploadStatusModal

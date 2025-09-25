@@ -1,5 +1,22 @@
 # CLAUDE.md - Important Project Guidelines
 
+## CRITICAL: Production-Ready Code Standards
+**NO BAND-AID SOLUTIONS - This is a production SaaS application**
+
+### Core Principles:
+1. **Always implement proper, long-term solutions** - Never use temporary workarounds or placeholder implementations
+2. **Research best practices** - Use WebSearch to find current best practices and modern libraries
+3. **Choose production-ready libraries** - Select actively maintained, well-documented libraries
+4. **Implement complete solutions** - Don't simplify or skip functionality for convenience
+5. **Think scalability** - Every solution should work for 1 user or 10,000 users
+6. **Security first** - Always consider security implications of implementations
+
+### When faced with library issues:
+- Research alternatives using WebSearch
+- Choose modern, maintained libraries over outdated ones
+- Implement proper error handling, not placeholders
+- If a complex solution is needed (e.g., Python backend for PDF), propose it
+
 ## IMPORTANT: Persistent Issues Tracking
 **Check PERSISTENT_ISSUES.md for recurring problems and their solutions**
 - If encountering an issue multiple times, document it in PERSISTENT_ISSUES.md

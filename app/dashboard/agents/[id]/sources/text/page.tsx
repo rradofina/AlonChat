@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
-import { AlertCircle, Loader2, Trash2, Edit2, Save, X, MoreHorizontal, Edit } from 'lucide-react'
+import { AlertCircle, Loader2, Trash2, Edit2, Save, X, MoreHorizontal, Edit, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -11,6 +11,8 @@ import SourcesSidebar from '@/components/agents/sources-sidebar'
 import { CustomSelect } from '@/components/ui/custom-select'
 import { FloatingActionBar } from '@/components/ui/floating-action-bar'
 import { Checkbox } from '@/components/ui/checkbox'
+import { usePagination } from '@/hooks/usePagination'
+import { PaginationControls } from '@/components/ui/pagination-controls'
 
 export default function TextPage() {
   const params = useParams()
@@ -217,11 +219,59 @@ export default function TextPage() {
     setEditContent('')
   }
 
+  const processedSources = textSources
+    .filter(source => {
+      if (!searchQuery) return true
+      const searchLower = searchQuery.toLowerCase()
+      return source.name?.toLowerCase().includes(searchLower) ||
+             source.content?.toLowerCase().includes(searchLower)
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case 'Newest':
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        case 'Oldest':
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        case 'Alphabetical (A-Z)':
+          return (a.name || '').localeCompare(b.name || '')
+        case 'Alphabetical (Z-A)':
+          return (b.name || '').localeCompare(a.name || '')
+        case 'Size (Smallest)':
+          return (a.size_bytes || 0) - (b.size_bytes || 0)
+        case 'Size (Largest)':
+          return (b.size_bytes || 0) - (a.size_bytes || 0)
+        default:
+          return 0
+      }
+    })
+
+  // Use the pagination hook
+  const {
+    currentPage,
+    setCurrentPage,
+    rowsPerPage,
+    setRowsPerPage,
+    totalPages,
+    currentItems: currentSources,
+    showPagination,
+    goToPage,
+    isFirstPage,
+    isLastPage,
+    itemsRange
+  } = usePagination({
+    items: processedSources,
+    defaultRowsPerPage: 20,
+    visibilityThreshold: 5,
+    rowsPerPageOptions: [5, 10, 25, 50]
+  })
+
+  const allPageSelected = currentSources.length > 0 && currentSources.every(source => selectedSources.includes(source.id))
+
   return (
     <div className="flex h-full">
       {/* Main Content Area */}
-      <div className="flex-1 p-8">
-        <div className="max-w-4xl mx-auto">
+      <div className="flex-1 p-8 pb-24">
+        <div className="mx-auto w-full max-w-6xl">
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">Text</h1>
           <p className="text-sm text-gray-600 mb-6">
             Add plain text-based sources to train your AI Agent with precise information.
@@ -292,29 +342,32 @@ export default function TextPage() {
           <div className="mt-8">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Text sources</h2>
 
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-4">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+              <div>
                 <label className="flex items-center gap-2 text-sm text-gray-700 hover:text-gray-900 cursor-pointer">
                   <Checkbox
-                    checked={selectedSources.length === textSources.length && textSources.length > 0}
+                    checked={allPageSelected}
                     onChange={() => {
-                      if (selectedSources.length === textSources.length) {
-                        setSelectedSources([])
+                      if (allPageSelected) {
+                        setSelectedSources(prev => prev.filter(id => !currentSources.find(source => source.id === id)))
                       } else {
-                        setSelectedSources(textSources.map(s => s.id))
+                        setSelectedSources(prev => {
+                          const newIds = currentSources.map(source => source.id)
+                          return Array.from(new Set([...prev, ...newIds]))
+                        })
                       }
                     }}
                   />
                   <span>Select all</span>
                 </label>
                 {selectedSources.length > 0 && (
-                  <span className="text-sm text-gray-500">
-                    All {selectedSources.length} items on this page are selected
+                  <span className="block text-sm text-gray-500 mt-1">
+                    {selectedSources.length} item(s) selected
                   </span>
                 )}
               </div>
 
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-4">
                 <div className="relative">
                   <input
                     type="text"
@@ -333,6 +386,7 @@ export default function TextPage() {
                     options={['Default', 'Newest', 'Oldest', 'Alphabetical (A-Z)', 'Alphabetical (Z-A)', 'Size (Smallest)', 'Size (Largest)']}
                   />
                 </div>
+
               </div>
             </div>
 
@@ -348,32 +402,7 @@ export default function TextPage() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {textSources
-                      .filter(source => {
-                        if (!searchQuery) return true
-                        const searchLower = searchQuery.toLowerCase()
-                        return source.name?.toLowerCase().includes(searchLower) ||
-                               source.content?.toLowerCase().includes(searchLower)
-                      })
-                      .sort((a, b) => {
-                        switch (sortBy) {
-                          case 'Newest':
-                            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-                          case 'Oldest':
-                            return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-                          case 'Alphabetical (A-Z)':
-                            return (a.name || '').localeCompare(b.name || '')
-                          case 'Alphabetical (Z-A)':
-                            return (b.name || '').localeCompare(a.name || '')
-                          case 'Size (Smallest)':
-                            return (a.size_bytes || 0) - (b.size_bytes || 0)
-                          case 'Size (Largest)':
-                            return (b.size_bytes || 0) - (a.size_bytes || 0)
-                          default:
-                            return 0
-                        }
-                      })
-                      .map((source) => (
+                    {currentSources.map((source) => (
                       <div key={source.id}>
                         {editingSource === source.id ? (
                           // Edit mode
@@ -501,12 +530,28 @@ export default function TextPage() {
               </div>
             </div>
 
-            {textSources.length > 0 && (
-              <div className="flex justify-between items-center mt-4 text-sm text-gray-600">
-                <span>{textSources.length} text snippet(s)</span>
-              </div>
-            )}
+            {/* Pagination Controls */}
+            <PaginationControls
+              currentPage={currentPage}
+              totalPages={totalPages}
+              rowsPerPage={rowsPerPage}
+              totalItems={processedSources.length}
+              onPageChange={goToPage}
+              onRowsPerPageChange={(rows) => {
+                setRowsPerPage(rows)
+                // Clear selections when changing page size
+                setSelectedSources([])
+              }}
+              rowsPerPageOptions={[5, 10, 25, 50]}
+              showPagination={showPagination}
+              itemsRange={itemsRange}
+              isFirstPage={isFirstPage}
+              isLastPage={isLastPage}
+              itemLabel="text snippet"
+            />
           </div>
+          {/* Add padding at bottom */}
+          <div className="h-6"></div>
         </div>
       </div>
 

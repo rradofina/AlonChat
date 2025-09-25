@@ -10,6 +10,8 @@ import SourcesSidebar from '@/components/agents/sources-sidebar'
 import { CustomSelect } from '@/components/ui/custom-select'
 import { FloatingActionBar } from '@/components/ui/floating-action-bar'
 import { Checkbox } from '@/components/ui/checkbox'
+import { usePagination } from '@/hooks/usePagination'
+import { PaginationControls } from '@/components/ui/pagination-controls'
 
 interface SubLink {
   url: string
@@ -286,11 +288,56 @@ export default function WebsitePage() {
     return sources.reduce((total, source) => total + (source.pages_crawled * 25), 0) // Estimate 25KB per page
   }
 
+  const filteredSources = sources
+    .filter(source => {
+      if (!searchQuery) return true
+      const lower = searchQuery.toLowerCase()
+      return source.url.toLowerCase().includes(lower) || source.name.toLowerCase().includes(lower)
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case 'Status':
+          return a.status.localeCompare(b.status)
+        case 'Newest':
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        case 'Oldest':
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        case 'Alphabetical (A-Z)':
+          return a.url.localeCompare(b.url)
+        case 'Alphabetical (Z-A)':
+          return b.url.localeCompare(a.url)
+        default:
+          return 0
+      }
+    })
+
+  // Use the pagination hook
+  const {
+    currentPage,
+    setCurrentPage,
+    rowsPerPage,
+    setRowsPerPage,
+    totalPages,
+    currentItems: currentSources,
+    showPagination,
+    goToPage,
+    isFirstPage,
+    isLastPage,
+    itemsRange
+  } = usePagination({
+    items: filteredSources,
+    defaultRowsPerPage: 20,
+    visibilityThreshold: 5,
+    rowsPerPageOptions: [5, 10, 25, 50]
+  })
+
+  const allPageSelected = currentSources.length > 0 && currentSources.every(source => selectedSources.has(source.id))
+
   return (
     <div className="flex h-full">
       {/* Main Content Area */}
-      <div className="flex-1 p-8">
-        <div className="max-w-4xl mx-auto">
+      <div className="flex-1 p-8 pb-24">
+        <div className="mx-auto w-full max-w-6xl">
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">Website</h1>
           <p className="text-sm text-gray-600 mb-6">
             Crawl web pages or submit sitemaps to update your AI with the latest content.
@@ -474,14 +521,24 @@ export default function WebsitePage() {
               <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2 text-sm text-gray-700 hover:text-gray-900 cursor-pointer">
                   <Checkbox
-                    checked={selectedSources.size === sources.length && sources.length > 0}
-                    onChange={handleSelectAll}
+                    checked={allPageSelected}
+                    onChange={() => {
+                      setSelectedSources(prev => {
+                        const next = new Set(prev)
+                        if (allPageSelected) {
+                          currentSources.forEach(source => next.delete(source.id))
+                        } else {
+                          currentSources.forEach(source => next.add(source.id))
+                        }
+                        return next
+                      })
+                    }}
                   />
                   <span>Select all</span>
                 </label>
                 {selectedSources.size > 0 && (
                   <span className="text-sm text-gray-500">
-                    All {selectedSources.size} items on this page are selected
+                    {selectedSources.size} item(s) selected
                   </span>
                 )}
               </div>
@@ -508,35 +565,13 @@ export default function WebsitePage() {
               </div>
             </div>
 
-            {sources.length === 0 ? (
+            {filteredSources.length === 0 ? (
               <div className="bg-white border border-gray-200 rounded-lg p-6">
                 <p className="text-sm text-gray-500 text-center">No websites added yet</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {sources
-                  .filter(source => {
-                    if (!searchQuery) return true
-                    return source.url.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           source.name.toLowerCase().includes(searchQuery.toLowerCase())
-                  })
-                  .sort((a, b) => {
-                    switch (sortBy) {
-                      case 'Status':
-                        return a.status.localeCompare(b.status)
-                      case 'Newest':
-                        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-                      case 'Oldest':
-                        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-                      case 'Alphabetical (A-Z)':
-                        return a.url.localeCompare(b.url)
-                      case 'Alphabetical (Z-A)':
-                        return b.url.localeCompare(a.url)
-                      default:
-                        return 0
-                    }
-                  })
-                  .map((source) => {
+                {currentSources.map((source) => {
                   const isExpanded = expandedSources.has(source.id)
                   const isEditing = editingSource === source.id
                   const subLinks = source.metadata?.crawl_errors ? [] :
@@ -778,7 +813,29 @@ export default function WebsitePage() {
             )}
 
           </div>
+
+          {/* Pagination Controls */}
+          <PaginationControls
+            currentPage={currentPage}
+            totalPages={totalPages}
+            rowsPerPage={rowsPerPage}
+            totalItems={filteredSources.length}
+            onPageChange={goToPage}
+            onRowsPerPageChange={(rows) => {
+              setRowsPerPage(rows)
+              // Clear selections when changing page size
+              setSelectedSources(new Set())
+            }}
+            rowsPerPageOptions={[5, 10, 25, 50]}
+            showPagination={showPagination}
+            itemsRange={itemsRange}
+            isFirstPage={isFirstPage}
+            isLastPage={isLastPage}
+            itemLabel="link"
+          />
         </div>
+        {/* Add padding at bottom */}
+        <div className="h-6"></div>
       </div>
 
       {/* Right Sidebar */}

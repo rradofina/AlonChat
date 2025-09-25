@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { FileProcessor } from '@/lib/sources/file-processor'
 
+export const runtime = 'nodejs'
+
 export async function POST(
   request: NextRequest,
   props: { params: Promise<{ id: string }> }
@@ -33,31 +35,76 @@ export async function POST(
     for (const file of files) {
       try {
         // Process file to extract content
+        console.log('Processing file:', file.name, 'Type:', file.type, 'Size:', file.size)
         const processedFile = await FileProcessor.processFile(file)
+        console.log('File processed successfully:', {
+          fileName: file.name,
+          contentLength: processedFile.content?.length || 0,
+          pageCount: processedFile.pageCount
+        })
+
+        // Prepare the insert data
+        const insertData = {
+          agent_id: params.id,
+          project_id: agent.project_id,
+          type: 'file',
+          name: file.name,
+          size_kb: Math.round(file.size / 1024),
+          status: 'ready',
+          content: processedFile.content,
+          metadata: {
+            file_type: file.type,
+            original_name: file.name,
+            page_count: processedFile.pageCount,
+            pdf_metadata: processedFile.metadata
+          }
+        }
+
+        console.log('Attempting to insert source with data:', {
+          agent_id: insertData.agent_id,
+          project_id: insertData.project_id,
+          name: insertData.name,
+          size_kb: insertData.size_kb,
+          contentPreview: insertData.content?.substring(0, 100) + '...'
+        })
 
         // Insert source record into database with extracted content
         const { data: source, error: sourceError } = await supabase
           .from('sources')
-          .insert({
-            agent_id: params.id,
-            project_id: agent.project_id,
-            type: 'file',
-            name: file.name,
-            size_kb: Math.round(file.size / 1024),
-            status: 'ready', // Set to ready since content is extracted
-            content: processedFile.content, // Store extracted content
-            metadata: {
-              file_type: file.type,
-              original_name: file.name,
-              page_count: processedFile.pageCount,
-              pages: processedFile.pages,
-              pdf_metadata: processedFile.metadata
-            }
-          })
+          .insert(insertData)
           .select()
           .single()
 
-        if (!sourceError && source) {
+        if (sourceError) {
+          console.error('Database insert error:', {
+            error: sourceError,
+            message: sourceError.message,
+            details: sourceError.details,
+            hint: sourceError.hint,
+            code: sourceError.code
+          })
+          // Don't throw here, continue with error status
+          uploadedSources.push({
+            id: crypto.randomUUID(),
+            agent_id: params.id,
+            type: 'file',
+            name: file.name,
+            size_bytes: file.size,
+            status: 'error',
+            error: `Database error: ${sourceError.message}`,
+            created_at: new Date().toISOString(),
+            metadata: {
+              file_type: file.type,
+              original_name: file.name,
+              db_error: sourceError
+            }
+          })
+        } else if (source) {
+          console.log('File saved successfully to database:', {
+            id: source.id,
+            name: source.name,
+            status: source.status
+          })
           // Convert to match frontend expected format
           uploadedSources.push({
             id: source.id,
@@ -70,14 +117,47 @@ export async function POST(
             created_at: source.created_at,
             metadata: source.metadata
           })
-
-        } else if (sourceError) {
-          console.error('Error saving file source:', sourceError)
-          throw new Error('Failed to save file to database')
+        } else {
+          console.error('Unexpected: No error but also no source data returned')
+          uploadedSources.push({
+            id: crypto.randomUUID(),
+            agent_id: params.id,
+            type: 'file',
+            name: file.name,
+            size_bytes: file.size,
+            status: 'error',
+            error: 'No data returned from database',
+            created_at: new Date().toISOString(),
+            metadata: {
+              file_type: file.type,
+              original_name: file.name
+            }
+          })
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error processing file:', file.name, error)
-        // Continue with next file instead of failing entire batch
+        console.error('Error details:', {
+          fileName: file.name,
+          fileType: file.type,
+          fileSize: file.size,
+          errorMessage: error.message,
+          errorStack: error.stack
+        })
+        // Add failed file to response with error info
+        uploadedSources.push({
+          id: crypto.randomUUID(),
+          agent_id: params.id,
+          type: 'file',
+          name: file.name,
+          size_bytes: file.size,
+          status: 'error',
+          error: error.message || 'Failed to process file',
+          created_at: new Date().toISOString(),
+          metadata: {
+            file_type: file.type,
+            original_name: file.name
+          }
+        })
       }
     }
 

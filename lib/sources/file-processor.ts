@@ -1,5 +1,17 @@
-import pdf from 'pdf-parse'
 import mammoth from 'mammoth'
+
+let pdfjsLoader: Promise<typeof import('pdfjs-dist/legacy/build/pdf.mjs')> | null = null
+
+async function getPdfJs() {
+  if (!pdfjsLoader) {
+    pdfjsLoader = import('pdfjs-dist/legacy/build/pdf.mjs').then((mod) => {
+      // Disable workers in the Node.js environment
+      mod.GlobalWorkerOptions.disableWorker = true
+      return mod
+    })
+  }
+  return pdfjsLoader
+}
 
 export interface ProcessedFile {
   content: string
@@ -49,43 +61,80 @@ export class FileProcessor {
 
   private static async processPDF(file: File): Promise<ProcessedFile> {
     try {
-      // Convert File to Buffer
+      console.log('Processing PDF with pdfjs-dist:', file.name, 'Size:', file.size, 'bytes')
+
+      const pdfjs = await getPdfJs()
+
+      // Convert File to typed array for pdf.js
       const arrayBuffer = await file.arrayBuffer()
-      const buffer = Buffer.from(arrayBuffer)
-
-      // Parse PDF
-      const data = await pdf(buffer)
-
-      // Extract pages if available
-      const pages = []
-      if (data.numpages > 1 && data.text) {
-        // Split content by page (this is a simple approach, may need refinement)
-        const pageBreaks = data.text.split('\n\n')
-        for (let i = 0; i < Math.min(pageBreaks.length, data.numpages); i++) {
-          pages.push({
-            pageNumber: i + 1,
-            content: pageBreaks[i]
-          })
-        }
+      if (arrayBuffer.byteLength === 0) {
+        throw new Error('Uploaded PDF has 0 bytes')
       }
+
+      const uint8Array = new Uint8Array(arrayBuffer)
+
+      const loadingTask = pdfjs.getDocument({
+        data: uint8Array,
+        useSystemFonts: true,
+        isEvalSupported: false,
+        disableCreateObjectURL: true
+      })
+
+      const pdfDoc = await loadingTask.promise
+      const numPages = pdfDoc.numPages
+
+      const pageTexts: string[] = []
+
+      const cleanPageText = (text: string) => {
+        return text
+          .replace(/[-–—\s]*Page\s+\d+[-–—\s]*/gi, ' ')
+          .replace(/\s{2,}/g, ' ')
+          .trim()
+      }
+
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const page = await pdfDoc.getPage(pageNum)
+        const textContent = await page.getTextContent()
+
+        const rawPageText = textContent.items
+          .map((item: any) => {
+            if (typeof item.str === 'string') return item.str
+            if (item?.unicode) return item.unicode
+            return ''
+          })
+          .join(' ')
+
+        const pageText = cleanPageText(rawPageText)
+        pageTexts.push(pageText)
+      }
+
+      const metadataResult = await pdfDoc.getMetadata().catch(() => null)
+      const info = metadataResult?.info ?? {}
+
+      const pageSections = pageTexts.map((text, index) => {
+        const header = `--- Page ${index + 1} ---`
+        if (!text) return header
+        return `${header}\n\n${text}`
+      })
+
+      const fullText = pageSections.join('\n\n').trim()
 
       return {
-        content: data.text || '',
-        pageCount: data.numpages,
-        pages: pages.length > 0 ? pages : undefined,
+        content: fullText,
+        pageCount: numPages,
         metadata: {
-          pages: data.numpages,
-          title: data.info?.Title,
-          author: data.info?.Author,
-          subject: data.info?.Subject,
-          keywords: data.info?.Keywords,
-          creationDate: data.info?.CreationDate,
-          modificationDate: data.info?.ModificationDate,
+          title: info.Title || file.name,
+          author: info.Author,
+          subject: info.Subject,
+          keywords: info.Keywords,
+          creationDate: info.CreationDate ? new Date(info.CreationDate) : undefined,
+          modificationDate: info.ModDate ? new Date(info.ModDate) : undefined,
+          pages: numPages
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error processing PDF:', error)
-      throw new Error('Failed to process PDF file')
+      throw new Error(`Failed to process PDF file: ${error.message}`)
     }
   }
 
@@ -107,9 +156,9 @@ export class FileProcessor {
           pages: 1 // DOCX doesn't provide page count easily
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error processing DOCX:', error)
-      throw new Error('Failed to process DOCX file')
+      throw new Error(`Failed to process DOCX file: ${error.message}`)
     }
   }
 

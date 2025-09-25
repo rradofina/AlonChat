@@ -12,6 +12,8 @@ import { CustomSelect } from '@/components/ui/custom-select'
 import { FloatingActionBar } from '@/components/ui/floating-action-bar'
 import { Checkbox } from '@/components/ui/checkbox'
 import { uploadMultipleImages, isValidImageType, validateImageSize, deleteMultipleImages } from '@/lib/supabase/storage'
+import { usePagination } from '@/hooks/usePagination'
+import { PaginationControls } from '@/components/ui/pagination-controls'
 
 interface QASource {
   id: string
@@ -363,6 +365,53 @@ export default function QAPage() {
     return qaItems.reduce((total, item) => total + (item.size_bytes || 0), 0)
   }
 
+  // Filter and sort items - do this at the component level, not in render
+  const filteredItems = qaItems
+    .filter(item => {
+      if (!searchQuery) return true
+      const questionsToSearch = item.questions || [item.question]
+      return questionsToSearch.some(q => q.toLowerCase().includes(searchQuery.toLowerCase())) ||
+             item.answer.toLowerCase().includes(searchQuery.toLowerCase())
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case 'Newest':
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        case 'Oldest':
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        case 'Alphabetical (A-Z)':
+          return a.question.localeCompare(b.question)
+        case 'Alphabetical (Z-A)':
+          return b.question.localeCompare(a.question)
+        case 'Size (Smallest)':
+          return a.size_bytes - b.size_bytes
+        case 'Size (Largest)':
+          return b.size_bytes - a.size_bytes
+        default:
+          return 0
+      }
+    })
+
+  // Use pagination hook at the top level - NEVER conditionally
+  const {
+    currentPage,
+    setCurrentPage,
+    rowsPerPage,
+    setRowsPerPage,
+    totalPages,
+    currentItems,
+    showPagination,
+    goToPage,
+    isFirstPage,
+    isLastPage,
+    itemsRange
+  } = usePagination({
+    items: filteredItems,
+    defaultRowsPerPage: 20,
+    visibilityThreshold: 5,
+    rowsPerPageOptions: [5, 10, 25, 50]
+  })
+
   return (
     <div className="flex h-full">
       {/* Main Content Area */}
@@ -574,33 +623,9 @@ export default function QAPage() {
                 <p className="text-sm text-gray-500 text-center">No Q&A pairs added yet</p>
               </div>
             ) : (
-              <div className="space-y-4">
-                {qaItems
-                  .filter(item => {
-                    if (!searchQuery) return true
-                    const questionsToSearch = item.questions || [item.question]
-                    return questionsToSearch.some(q => q.toLowerCase().includes(searchQuery.toLowerCase())) ||
-                           item.answer.toLowerCase().includes(searchQuery.toLowerCase())
-                  })
-                  .sort((a, b) => {
-                    switch (sortBy) {
-                      case 'Newest':
-                        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-                      case 'Oldest':
-                        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-                      case 'Alphabetical (A-Z)':
-                        return a.question.localeCompare(b.question)
-                      case 'Alphabetical (Z-A)':
-                        return b.question.localeCompare(a.question)
-                      case 'Size (Smallest)':
-                        return a.size_bytes - b.size_bytes
-                      case 'Size (Largest)':
-                        return b.size_bytes - a.size_bytes
-                      default:
-                        return 0
-                    }
-                  })
-                  .map((item) => (
+              <>
+                <div className="space-y-4">
+                  {currentItems.map((item) => (
                   <div key={item.id} className="bg-white border border-gray-200 rounded-lg">
                     {editingId === item.id ? (
                       <div className="p-4 space-y-3">
@@ -846,11 +871,32 @@ export default function QAPage() {
                     )}
                   </div>
                 ))}
-              </div>
+                </div>
+
+                {/* Pagination Controls */}
+                <PaginationControls
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  rowsPerPage={rowsPerPage}
+                  totalItems={filteredItems.length}
+                  onPageChange={goToPage}
+                  onRowsPerPageChange={(rows) => {
+                    setRowsPerPage(rows)
+                    // Clear selections when changing page size
+                    setSelectedItems(new Set())
+                  }}
+                  rowsPerPageOptions={[5, 10, 25, 50]}
+                  showPagination={showPagination}
+                  itemsRange={itemsRange}
+                  isFirstPage={isFirstPage}
+                  isLastPage={isLastPage}
+                  itemLabel="Q&A pair"
+                />
+              </>
             )}
           </div>
           {/* Add padding at bottom */}
-          <div className="h-24"></div>
+          <div className="h-6"></div>
         </div>
       </div>
 

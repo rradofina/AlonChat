@@ -8,11 +8,15 @@ interface CustomSelectProps {
   onChange: (value: string) => void
   options: string[]
   className?: string
+  dropUp?: boolean
+  compact?: boolean
 }
 
-export function CustomSelect({ value, onChange, options, className = '' }: CustomSelectProps) {
+export function CustomSelect({ value, onChange, options, className = '', dropUp = false, compact = false }: CustomSelectProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const [shouldDropUp, setShouldDropUp] = useState(dropUp)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -27,9 +31,22 @@ export function CustomSelect({ value, onChange, options, className = '' }: Custo
     }
   }, [])
 
+  useEffect(() => {
+    if (isOpen && buttonRef.current) {
+      const buttonRect = buttonRef.current.getBoundingClientRect()
+      const spaceBelow = window.innerHeight - buttonRect.bottom
+      const spaceAbove = buttonRect.top
+      const dropdownHeight = options.length * 40 + 20 // Approximate height
+
+      // If not enough space below and more space above, or if dropUp is forced
+      setShouldDropUp(dropUp || (spaceBelow < dropdownHeight && spaceAbove > spaceBelow))
+    }
+  }, [isOpen, options.length, dropUp])
+
   return (
     <div className={`relative ${className}`} ref={dropdownRef}>
       <button
+        ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-md hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 transition-colors"
       >
@@ -38,7 +55,7 @@ export function CustomSelect({ value, onChange, options, className = '' }: Custo
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-50">
+        <div className={`absolute right-0 ${shouldDropUp ? 'bottom-full mb-1' : 'top-full mt-1'} ${compact ? 'min-w-[80px]' : 'w-48'} bg-white border border-gray-200 rounded-md shadow-lg z-50`}>
           <div className="py-1">
             {options.map((option) => (
               <button
@@ -47,13 +64,13 @@ export function CustomSelect({ value, onChange, options, className = '' }: Custo
                   onChange(option)
                   setIsOpen(false)
                 }}
-                className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center justify-between group transition-colors"
+                className={`w-full ${compact ? 'px-3 py-1.5' : 'px-4 py-2'} text-sm text-left hover:bg-gray-50 flex items-center justify-between group transition-colors`}
               >
                 <span className={`${value === option ? 'text-gray-900 font-medium' : 'text-gray-700'}`}>
                   {option}
                 </span>
-                {value === option && (
-                  <Check className="h-4 w-4 text-gray-700" />
+                {value === option && compact ? null : value === option && (
+                  <Check className="h-4 w-4 text-gray-700 ml-2" />
                 )}
               </button>
             ))}
