@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { queueWebsiteCrawl, getJobStatus } from '@/lib/queue/website-processor'
 import { scrapeWebsite } from '@/lib/sources/website-scraper'
-import { chunkWebsiteContent } from '@/lib/sources/chunker'
+import { ChunkManager } from '@/lib/services/chunk-manager'
 
 export async function POST(
   request: NextRequest,
@@ -42,11 +42,15 @@ export async function POST(
         website_url: url,
         size_kb: 0, // Will be updated as pages are crawled
         status: 'pending',
+        is_trained: false, // Explicitly set to false - websites are not trained until training is run
+        chunk_count: 0,
         metadata: {
           url,
           crawl_subpages: crawlSubpages || false,
           max_pages: maxPages || 10,
-          pages_crawled: 0
+          pages_crawled: 0,
+          crawled_pages: [],
+          crawl_errors: []
         }
       })
       .select()
@@ -128,6 +132,7 @@ export async function GET(
       .select('*')
       .eq('agent_id', params.id)
       .eq('type', 'website')
+      .neq('status', 'removed') // Don't show soft-deleted websites
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -146,6 +151,8 @@ export async function GET(
       pages_crawled: source.metadata?.pages_crawled || 0,
       max_pages: source.metadata?.max_pages || 10,
       crawl_subpages: source.metadata?.crawl_subpages || false,
+      chunk_count: source.chunk_count || 0,
+      is_trained: source.is_trained || false,
       created_at: source.created_at,
       metadata: source.metadata
     }))
@@ -180,22 +187,10 @@ async function processWebsiteDirectly(
 
     // Update pages crawled count with crawled pages list
     const crawledPages = crawlResults.filter(r => !r.error).map(r => r.url)
-    await supabase
-      .from('sources')
-      .update({
-        metadata: {
-          url,
-          crawl_subpages: crawlSubpages,
-          max_pages: maxPages,
-          pages_crawled: crawlResults.length,
-          crawled_pages: crawledPages,
-          crawl_errors: crawlResults.filter(r => r.error).map(r => ({
-            url: r.url,
-            error: r.error
-          }))
-        }
-      })
-      .eq('id', sourceId)
+    const crawlErrors = crawlResults.filter(r => r.error).map(r => ({
+      url: r.url,
+      error: r.error
+    }))
 
     // Process and chunk content
     const validPages = crawlResults.filter(r => !r.error && r.content)
@@ -204,50 +199,61 @@ async function processWebsiteDirectly(
     }
 
     console.log(`Processing ${validPages.length} pages`)
-    const chunks = await chunkWebsiteContent(validPages)
 
-    // Calculate total size
-    const totalSize = chunks.reduce((sum, chunk) => sum + chunk.content.length, 0)
+    // Process each page separately to maintain page boundaries
+    let totalChunks = 0
+    let totalSize = 0
 
-    // Insert chunks into database
-    const { error: insertError } = await supabase
-      .from('documents')
-      .insert(
-        chunks.map((chunk, index) => ({
-          source_id: sourceId,
-          agent_id: agentId,
-          project_id: projectId,
-          content: chunk.content,
-          embedding: chunk.embedding || null,
-          metadata: chunk.metadata,
-          chunk_index: index
-        }))
-      )
+    for (const page of validPages) {
+      // Store chunks for each page with page-specific metadata
+      const chunkCount = await ChunkManager.storeChunks({
+        sourceId,
+        agentId,
+        projectId,
+        content: page.content || '',
+        metadata: {
+          type: 'website',
+          page_url: page.url,
+          page_title: page.title || page.url,
+          root_url: url,
+          crawl_timestamp: new Date().toISOString(),
+          // Add link depth if available
+          depth: page.url === url ? 0 : page.url.split('/').length - url.split('/').length
+        },
+        chunkSize: 4000, // Larger chunks for websites
+        chunkOverlap: 400 // Maintain overlap for context
+      })
 
-    if (insertError) {
-      throw new Error(`Failed to insert chunks: ${insertError.message}`)
+      totalChunks += chunkCount
+      totalSize += (page.content || '').length
+      console.log(`Chunked page ${page.url}: ${chunkCount} chunks`)
     }
 
-    // Update source status to ready
+    // Calculate size in KB
+    const sizeKb = Math.ceil(totalSize / 1024)
+
+    // Update source status to ready with all metadata
     await supabase
       .from('sources')
       .update({
         status: 'ready',
-        size_kb: Math.ceil(totalSize / 1024),
+        size_kb: sizeKb,
+        chunk_count: totalChunks,
         metadata: {
           url,
           crawl_subpages: crawlSubpages,
           max_pages: maxPages,
           pages_crawled: validPages.length,
           crawled_pages: validPages.map(p => p.url),
-          total_chunks: chunks.length,
+          crawl_errors: crawlErrors,
+          total_chunks: totalChunks,
           crawl_completed_at: new Date().toISOString()
         },
         updated_at: new Date().toISOString()
       })
       .eq('id', sourceId)
 
-    console.log(`Successfully processed ${validPages.length} pages, ${chunks.length} chunks`)
+    console.log(`Successfully processed ${validPages.length} pages, ${totalChunks} chunks`)
 
   } catch (error: any) {
     console.error(`Error processing website:`, error)
@@ -337,11 +343,20 @@ export async function PATCH(
           )
         }
 
-        // Delete existing documents
-        await supabase
-          .from('documents')
+        // Check if source is trained - if so, we should be careful about re-crawling
+        if (source.is_trained) {
+          console.warn(`Re-crawling trained website source ${sourceId} - training will need to be re-run`)
+        }
+
+        // Delete existing chunks from source_chunks table
+        const { error: chunkDeleteError } = await supabase
+          .from('source_chunks')
           .delete()
           .eq('source_id', sourceId)
+
+        if (chunkDeleteError) {
+          console.error('Error deleting existing chunks:', chunkDeleteError)
+        }
 
         // Reset source status
         await supabase
@@ -349,6 +364,8 @@ export async function PATCH(
           .update({
             status: 'pending',
             size_kb: 0,
+            chunk_count: 0,
+            is_trained: false, // Reset training status since content is being replaced
             metadata: {
               ...source.metadata,
               pages_crawled: 0,
@@ -409,7 +426,7 @@ export async function PATCH(
         // Get current source
         const { data: source, error: fetchError } = await supabase
           .from('sources')
-          .select('metadata')
+          .select('metadata, chunk_count')
           .eq('id', sourceId)
           .eq('agent_id', params.id)
           .single()
@@ -425,17 +442,21 @@ export async function PATCH(
         const crawledPages = source.metadata?.crawled_pages || []
         const updatedPages = crawledPages.filter((url: string) => url !== linkUrl)
 
-        // Delete documents from this URL
-        await supabase
-          .from('documents')
+        // Delete chunks from this URL
+        const { data: deletedChunks } = await supabase
+          .from('source_chunks')
           .delete()
           .eq('source_id', sourceId)
           .eq('metadata->page_url', linkUrl)
+          .select('id')
 
-        // Update source metadata
+        const deletedCount = deletedChunks?.length || 0
+
+        // Update source metadata and chunk count
         const { error: updateError } = await supabase
           .from('sources')
           .update({
+            chunk_count: Math.max(0, (source.chunk_count || 0) - deletedCount),
             metadata: {
               ...source.metadata,
               crawled_pages: updatedPages,
@@ -443,7 +464,8 @@ export async function PATCH(
               excluded_links: [
                 ...(source.metadata?.excluded_links || []),
                 linkUrl
-              ]
+              ],
+              total_chunks: Math.max(0, (source.metadata?.total_chunks || 0) - deletedCount)
             },
             updated_at: new Date().toISOString()
           })
@@ -495,19 +517,100 @@ export async function DELETE(
       )
     }
 
-    // Delete from database
-    const { error } = await supabase
+    // Get sources to check if they're trained
+    const { data: sources, error: fetchError } = await supabase
       .from('sources')
-      .delete()
+      .select('id, is_trained')
       .in('id', sourceIds)
       .eq('agent_id', params.id)
 
-    if (error) {
-      console.error('Delete error:', error)
+    if (fetchError) {
+      console.error('Error fetching sources:', fetchError)
       return NextResponse.json(
-        { error: 'Failed to delete websites' },
+        { error: 'Failed to fetch sources' },
         { status: 500 }
       )
+    }
+
+    if (!sources || sources.length === 0) {
+      return NextResponse.json(
+        { error: 'No sources found' },
+        { status: 404 }
+      )
+    }
+
+    // Separate trained and untrained sources
+    const trainedIds = sources.filter(s => s.is_trained).map(s => s.id)
+    const untrainedIds = sources.filter(s => !s.is_trained).map(s => s.id)
+
+    // Soft delete trained sources (mark as 'removed')
+    if (trainedIds.length > 0) {
+      const { error: softDeleteError } = await supabase
+        .from('sources')
+        .update({
+          status: 'removed',
+          updated_at: new Date().toISOString()
+        })
+        .in('id', trainedIds)
+        .eq('agent_id', params.id)
+
+      if (softDeleteError) {
+        console.error('Soft delete error:', softDeleteError)
+        return NextResponse.json(
+          { error: 'Failed to remove trained websites' },
+          { status: 500 }
+        )
+      }
+      console.log(`Soft deleted ${trainedIds.length} trained website sources`)
+    }
+
+    // Hard delete untrained sources
+    if (untrainedIds.length > 0) {
+      // First delete any associated chunks to avoid foreign key constraint issues
+      const { error: chunkDeleteError } = await supabase
+        .from('source_chunks')
+        .delete()
+        .in('source_id', untrainedIds)
+
+      if (chunkDeleteError) {
+        console.error('Error deleting chunks:', chunkDeleteError)
+        // Continue anyway - chunks might not exist
+      }
+
+      const { error: hardDeleteError } = await supabase
+        .from('sources')
+        .delete()
+        .in('id', untrainedIds)
+        .eq('agent_id', params.id)
+
+      if (hardDeleteError) {
+        console.error('Hard delete error:', hardDeleteError)
+        return NextResponse.json(
+          { error: 'Failed to delete untrained websites' },
+          { status: 500 }
+        )
+      }
+      console.log(`Hard deleted ${untrainedIds.length} untrained website sources`)
+    }
+
+    // Update agent's source count
+    const { data: stats } = await supabase
+      .from('sources')
+      .select('type, size_kb')
+      .eq('agent_id', params.id)
+      .neq('status', 'removed')
+
+    if (stats) {
+      const totalSources = stats.length
+      const totalSizeKb = stats.reduce((sum, s) => sum + s.size_kb, 0)
+
+      await supabase
+        .from('agents')
+        .update({
+          total_sources: totalSources,
+          total_size_kb: totalSizeKb
+        })
+        .eq('id', params.id)
     }
 
     return NextResponse.json({

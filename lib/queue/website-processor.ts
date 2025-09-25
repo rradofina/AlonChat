@@ -2,7 +2,7 @@ import { Queue, Worker, Job } from 'bullmq'
 import IORedis from 'ioredis'
 import { createClient } from '@/lib/supabase/server'
 import { scrapeWebsite } from '@/lib/sources/website-scraper'
-import { chunkWebsiteContent } from '@/lib/sources/chunker'
+import { ChunkManager } from '@/lib/services/chunk-manager'
 
 export interface WebsiteCrawlJob {
   sourceId: string
@@ -130,24 +130,12 @@ async function processWebsiteCrawl(job: Job<WebsiteCrawlJob>) {
 
     await job.updateProgress(50)
 
-    // Update pages crawled count with crawled pages list
+    // Track initial crawl results
     const crawledPages = crawlResults.filter(r => !r.error).map(r => r.url)
-    await supabase
-      .from('sources')
-      .update({
-        metadata: {
-          url,
-          crawl_subpages: crawlSubpages,
-          max_pages: maxPages,
-          pages_crawled: crawlResults.length,
-          crawled_pages: crawledPages,
-          crawl_errors: crawlResults.filter(r => r.error).map(r => ({
-            url: r.url,
-            error: r.error
-          }))
-        }
-      })
-      .eq('id', sourceId)
+    const crawlErrors = crawlResults.filter(r => r.error).map(r => ({
+      url: r.url,
+      error: r.error
+    }))
 
     // Process and chunk content
     const validPages = crawlResults.filter(r => !r.error && r.content)
@@ -156,45 +144,59 @@ async function processWebsiteCrawl(job: Job<WebsiteCrawlJob>) {
     }
 
     console.log(`Processing ${validPages.length} pages`)
-    const chunks = await chunkWebsiteContent(validPages)
 
-    await job.updateProgress(80)
+    // Process each page separately to maintain page boundaries
+    let totalChunks = 0
+    let totalSize = 0
 
-    // Calculate total size
-    const totalSize = chunks.reduce((sum, chunk) => sum + chunk.content.length, 0)
+    for (const page of validPages) {
+      // Store chunks for each page with page-specific metadata
+      const chunkCount = await ChunkManager.storeChunks({
+        sourceId,
+        agentId,
+        projectId,
+        content: page.content || '',
+        metadata: {
+          type: 'website',
+          page_url: page.url,
+          page_title: page.title || page.url,
+          root_url: url,
+          crawl_timestamp: new Date().toISOString(),
+          // Add link depth if available
+          depth: page.url === url ? 0 : page.url.split('/').length - url.split('/').length
+        },
+        chunkSize: 4000, // Larger chunks for websites
+        chunkOverlap: 400 // Maintain overlap for context
+      })
 
-    // Insert chunks into database
-    const { error: insertError } = await supabase
-      .from('documents')
-      .insert(
-        chunks.map((chunk, index) => ({
-          source_id: sourceId,
-          agent_id: agentId,
-          project_id: projectId,
-          content: chunk.content,
-          embedding: chunk.embedding || null,
-          metadata: chunk.metadata,
-          chunk_index: index
-        }))
-      )
+      totalChunks += chunkCount
+      totalSize += (page.content || '').length
+      console.log(`Chunked page ${page.url}: ${chunkCount} chunks`)
 
-    if (insertError) {
-      throw new Error(`Failed to insert chunks: ${insertError.message}`)
+      // Update progress for each page
+      const pageProgress = 80 + Math.floor((20 * validPages.indexOf(page)) / validPages.length)
+      await job.updateProgress(pageProgress)
     }
 
-    // Update source status to ready
+    // Calculate size in KB
+    const sizeKb = Math.ceil(totalSize / 1024)
+
+    // Update source status to ready with all metadata
     await supabase
       .from('sources')
       .update({
         status: 'ready',
-        size_kb: Math.ceil(totalSize / 1024),
+        size_kb: sizeKb,
+        chunk_count: totalChunks,
+        is_trained: false, // Mark as not trained initially
         metadata: {
           url,
           crawl_subpages: crawlSubpages,
           max_pages: maxPages,
           pages_crawled: validPages.length,
           crawled_pages: validPages.map(p => p.url),
-          total_chunks: chunks.length,
+          crawl_errors: crawlErrors,
+          total_chunks: totalChunks,
           crawl_completed_at: new Date().toISOString()
         },
         updated_at: new Date().toISOString()
@@ -202,7 +204,7 @@ async function processWebsiteCrawl(job: Job<WebsiteCrawlJob>) {
       .eq('id', sourceId)
 
     await job.updateProgress(100)
-    console.log(`Successfully processed ${validPages.length} pages, ${chunks.length} chunks`)
+    console.log(`Successfully processed ${validPages.length} pages, ${totalChunks} chunks`)
 
   } catch (error: any) {
     console.error(`Error processing website crawl:`, error)

@@ -9,12 +9,72 @@ export async function POST(
   const params = await props.params
   try {
     const supabase = await createClient()
-    const requestBody = await request.json()
-    const { question, questions, answer, images, title } = requestBody
 
+    // Check content type FIRST before trying to parse
+    const contentType = request.headers.get('content-type')
+    let questionsArray: string[] = []
+    let answer = ''
+    let title = ''
+    let imageUrls: string[] = []
 
-    // Support both single question (backward compat) and questions array
-    const questionsArray = questions || (question ? [question] : [])
+    if (contentType && contentType.includes('multipart/form-data')) {
+      const formData = await request.formData()
+
+      // Get form fields
+      title = formData.get('title') as string || ''
+      const questionsJson = formData.get('questions') as string || '[]'
+      answer = formData.get('answer') as string || ''
+
+      // Parse questions array
+      try {
+        questionsArray = JSON.parse(questionsJson)
+      } catch {
+        questionsArray = []
+      }
+
+      // Handle image uploads
+      const imageFiles = formData.getAll('images') as File[]
+
+      if (imageFiles && imageFiles.length > 0) {
+        // Upload each image to Supabase Storage
+        for (const file of imageFiles) {
+          if (file && file.size > 0) {
+            const timestamp = Date.now()
+            const random = Math.random().toString(36).substring(7)
+            const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+            const fileName = `${timestamp}-${random}.${fileExt}`
+            const filePath = `${params.id}/qa/${fileName}`
+
+            // Upload to Supabase Storage
+            const { error: uploadError } = await supabase.storage
+              .from('agent-sources')
+              .upload(filePath, file, {
+                contentType: file.type,
+                upsert: false
+              })
+
+            if (!uploadError) {
+              // Get public URL
+              const { data: { publicUrl } } = supabase.storage
+                .from('agent-sources')
+                .getPublicUrl(filePath)
+
+              imageUrls.push(publicUrl)
+            } else {
+              console.error('Error uploading image:', uploadError)
+            }
+          }
+        }
+      }
+    } else {
+      // Handle JSON request (backward compatibility)
+      const requestBody = await request.json()
+      const { question, questions, answer: answerParam, images, title: titleParam } = requestBody
+      questionsArray = questions || (question ? [question] : [])
+      answer = answerParam || ''
+      title = titleParam || ''
+      imageUrls = images || []
+    }
 
     if (!questionsArray.length || !answer) {
       return NextResponse.json(
@@ -44,8 +104,8 @@ export async function POST(
     // Prepare metadata with images
     const metadata = {
       title: title || questionsArray[0],
-      has_images: images && Array.isArray(images) && images.length > 0,
-      images: images && Array.isArray(images) ? images : []
+      has_images: imageUrls.length > 0,
+      images: imageUrls
     }
 
 
@@ -59,7 +119,7 @@ export async function POST(
         name: name,
         content: '', // Don't store content directly - will use chunks
         size_kb: sizeKb,
-        status: 'chunking', // Mark as chunking while we process
+        status: 'processing', // Use 'processing' status
         is_trained: false, // Explicitly set to false - Q&As are not trained until training is run
         chunk_count: 0,
         metadata: metadata
@@ -72,11 +132,11 @@ export async function POST(
       console.error('Failed insert data:', {
         agent_id: params.id,
         project_id: agent.project_id,
-        images: images,
+        images: imageUrls,
         metadata: {
           title: title || questionsArray[0],
-          has_images: images && images.length > 0,
-          images: images || []
+          has_images: imageUrls.length > 0,
+          images: imageUrls
         }
       })
       return NextResponse.json(
@@ -141,7 +201,7 @@ export async function POST(
       question: questionsArray.join(' | '), // Keep for backward compatibility
       questions: questionsArray, // New array format
       answer: answer,
-      images: source.metadata?.images || images || [],
+      images: source.metadata?.images || imageUrls || [],
       size_bytes: sizeBytes,
       status: source.status,
       created_at: source.created_at,
