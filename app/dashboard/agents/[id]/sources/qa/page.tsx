@@ -640,6 +640,7 @@ export default function QAPage() {
                 </div>
               </div>
             </div>
+            </div>
           )}
 
           {/* Add Q&A Button - Show when form is hidden */}
@@ -965,6 +966,7 @@ export default function QAPage() {
                         </div>
                       </div>
                     )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -992,6 +994,7 @@ export default function QAPage() {
           </div>
         </div>
       </div>
+    </div>
     </div>
 
       {/* Right Sidebar */}
