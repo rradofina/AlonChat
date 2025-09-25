@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { AlertCircle, Plus, HelpCircle, Edit, Trash2, X, MoreHorizontal, Upload, Image as ImageIcon } from 'lucide-react'
+import { AlertCircle, Plus, HelpCircle, Edit, Trash2, X, MoreHorizontal, Upload, Image as ImageIcon, ChevronRight, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -11,9 +11,17 @@ import SourcesSidebar from '@/components/agents/sources-sidebar'
 import { CustomSelect } from '@/components/ui/custom-select'
 import { FloatingActionBar } from '@/components/ui/floating-action-bar'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator
+} from '@/components/ui/dropdown-menu'
 import { uploadMultipleImages, isValidImageType, validateImageSize, deleteMultipleImages } from '@/lib/supabase/storage'
 import { usePagination } from '@/hooks/usePagination'
 import { PaginationControls } from '@/components/ui/pagination-controls'
+import { QAViewer } from '@/components/agents/qa-viewer'
 
 interface QASource {
   id: string
@@ -36,10 +44,12 @@ export default function QAPage() {
   const [title, setTitle] = useState('')
   const [questions, setQuestions] = useState<string[]>([''])
   const [answer, setAnswer] = useState('')
+  const [showAddForm, setShowAddForm] = useState(false)
   const [showRetrainingAlert, setShowRetrainingAlert] = useState(false)
   const [qaItems, setQaItems] = useState<QASource[]>([])
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(false)
+  const [viewingQA, setViewingQA] = useState<any | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editQuestions, setEditQuestions] = useState<string[]>([''])
   const [editAnswer, setEditAnswer] = useState('')
@@ -229,6 +239,7 @@ export default function QAPage() {
         imagePreviewUrls.forEach(url => URL.revokeObjectURL(url))
         setSelectedImages([])
         setImagePreviewUrls([])
+        setShowAddForm(false) // Hide the form after successful add
 
         // Fetch fresh data to ensure images are loaded
         await fetchQASources()
@@ -365,6 +376,46 @@ export default function QAPage() {
     return qaItems.reduce((total, item) => total + (item.size_bytes || 0), 0)
   }
 
+  const openQAViewer = (qa: any) => {
+    // Ensure qa has agent_id for API calls
+    setViewingQA({ ...qa, agent_id: params.id })
+  }
+
+  const handleQAUpdate = () => {
+    setShowRetrainingAlert(true)
+    setRefreshTrigger(prev => prev + 1)
+    fetchQASources()
+  }
+
+  const handleQADelete = async (id: string) => {
+    try {
+      const response = await fetch(`/api/agents/${params.id}/sources/qa`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceIds: [id] }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to delete Q&A')
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Q&A pair deleted successfully',
+      })
+
+      setViewingQA(null)
+      setShowRetrainingAlert(true)
+      await fetchQASources()
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete Q&A',
+        variant: 'destructive',
+      })
+    }
+  }
+
   // Filter and sort items - do this at the component level, not in render
   const filteredItems = qaItems
     .filter(item => {
@@ -412,11 +463,23 @@ export default function QAPage() {
     rowsPerPageOptions: [5, 10, 25, 50]
   })
 
+  // Show QAViewer if a Q&A item is selected for viewing
+  if (viewingQA) {
+    return (
+      <QAViewer
+        qa={viewingQA}
+        onBack={() => setViewingQA(null)}
+        onDelete={handleQADelete}
+        onUpdate={handleQAUpdate}
+      />
+    )
+  }
+
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-full bg-white">
       {/* Main Content Area */}
-      <div className="flex-1 p-8">
-        <div className="max-w-4xl mx-auto">
+      <div className="flex-1 px-8 pt-8 pb-4 bg-white min-h-full overflow-y-auto">
+        <div className="mx-auto w-full max-w-6xl">
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">Q&A</h1>
           <p className="text-sm text-gray-600 mb-6">
             Craft responses for key questions, ensuring your AI shares relevant info.
@@ -434,10 +497,11 @@ export default function QAPage() {
             </div>
           )}
 
-          {/* Add Q&A Section */}
-          <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
-            <div className="p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Add Q&A</h2>
+          {/* Add Q&A Section - Only show when there's input or showAddForm is true */}
+          {(showAddForm || title || questions.some(q => q.trim()) || answer || selectedImages.length > 0) && (
+            <div className="bg-gray-50 border-2 border-gray-200 border-dashed rounded-lg">
+              <div className="p-8">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Add Q&A pair</h2>
 
               <div className="space-y-4">
                 <div>
@@ -447,7 +511,7 @@ export default function QAPage() {
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="Ex: Refund requests"
-                    className="w-full"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-gray-400 placeholder-gray-400"
                   />
                 </div>
 
@@ -461,7 +525,7 @@ export default function QAPage() {
                           value={q}
                           onChange={(e) => handleQuestionChange(e.target.value, index)}
                           placeholder="Ex: How do I request a refund?"
-                          className="flex-1"
+                          className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-gray-400 placeholder-gray-400"
                         />
                         {questions.length > 1 && (
                           <button
@@ -491,7 +555,7 @@ export default function QAPage() {
                     value={answer}
                     onChange={(e) => handleAnswerChange(e.target.value)}
                     placeholder="Enter your answer..."
-                    className="min-h-[200px] resize-none"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-gray-400 placeholder-gray-400 min-h-[200px] resize-none"
                   />
                   <div className="text-right text-xs text-gray-500 mt-1">
                     {new TextEncoder().encode(answer).length} B
@@ -560,41 +624,57 @@ export default function QAPage() {
                 <div className="flex justify-end">
                   <Button
                     onClick={handleAddQA}
-                    disabled={isLoading || questions.every(q => !q.trim()) || !answer}
-                    className="bg-gray-900 hover:bg-gray-800 text-white"
+                    variant="outline"
+                    className="border-gray-300"
+                    disabled={isUploadingImages || questions.every(q => !q.trim()) || !answer}
                   >
-                    {isLoading ? 'Adding...' : 'Add Q&A'}
+                    {isUploadingImages ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Adding...
+                      </>
+                    ) : (
+                      'Add Q&A pair'
+                    )}
                   </Button>
                 </div>
               </div>
             </div>
-          </div>
+          )}
+
+          {/* Add Q&A Button - Show when form is hidden */}
+          {!showAddForm && !title && questions.every(q => !q.trim()) && !answer && selectedImages.length === 0 && (
+            <div className="mb-6 mt-8">
+              <Button
+                onClick={() => setShowAddForm(true)}
+                variant="outline"
+                className="border-gray-300"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Q&A pair
+              </Button>
+            </div>
+          )}
 
           {/* Q&A Sources List */}
           <div className="mt-8">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Q&A sources</h2>
 
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
+            {/* Controls row */}
+            <div className="mb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
                   <Checkbox
-                    checked={selectedItems.size === qaItems.length && qaItems.length > 0}
+                    checked={selectedItems.size === currentItems.length && currentItems.length > 0}
                     onChange={() => handleSelectAll()}
-                    className="cursor-pointer"
                   />
-                  <label
-                    onClick={handleSelectAll}
-                    className="text-sm text-gray-700 hover:text-gray-900 cursor-pointer select-none"
-                  >
-                    Select all
-                  </label>
+                  <span className="text-sm text-gray-600">Select all</span>
+                  {selectedItems.size > 0 && (
+                    <span className="ml-2 text-sm text-gray-500">
+                      {selectedItems.size} item(s) selected
+                    </span>
+                  )}
                 </div>
-                {selectedItems.size > 0 && (
-                  <span className="text-sm text-gray-500">
-                    All {selectedItems.size} items on this page are selected
-                  </span>
-                )}
-              </div>
 
               <div className="flex items-center gap-4">
                 <div className="relative">
@@ -618,17 +698,26 @@ export default function QAPage() {
               </div>
             </div>
 
-            {qaItems.length === 0 ? (
-              <div className="bg-white border border-gray-200 rounded-lg p-6">
-                <p className="text-sm text-gray-500 text-center">No Q&A pairs added yet</p>
-              </div>
-            ) : (
-              <>
-                <div className="space-y-4">
+            {/* Q&A List - No container, ultra-minimal */}
+            <div>
+              {isLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                </div>
+              ) : currentItems.length === 0 ? (
+                <div className="flex items-center justify-center text-center py-12">
+                  <div>
+                    <HelpCircle className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                    <p className="text-sm font-medium text-gray-900">No Q&A pairs</p>
+                    <p className="text-xs text-gray-500 mt-1">Add Q&A pairs to get started</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
                   {currentItems.map((item) => (
-                  <div key={item.id} className="bg-white border border-gray-200 rounded-lg">
-                    {editingId === item.id ? (
-                      <div className="p-4 space-y-3">
+                    <div key={item.id}>
+                      {editingId === item.id ? (
+                        <div className="py-4 space-y-3">
                         <div className="space-y-2">
                           <label className="text-sm font-medium text-gray-700">Questions</label>
                           {editQuestions.map((q, index) => (
@@ -823,21 +912,20 @@ export default function QAPage() {
                               </span>
                             </div>
                           </div>
-                          {/* Actions Menu */}
-                          <div className="relative dropdown-menu">
-                            <button
-                              className="p-1 hover:bg-gray-100 rounded"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setOpenDropdown(openDropdown === item.id ? null : item.id)
-                              }}
-                            >
-                              <MoreHorizontal className="h-4 w-4 text-gray-400" />
-                            </button>
-                            {openDropdown === item.id && (
-                              <div className="absolute right-0 mt-2 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                          <div className="flex items-center gap-1">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
                                 <button
-                                  onClick={() => {
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="p-1 hover:bg-gray-100 rounded transition-colors"
+                                >
+                                  <MoreHorizontal className="h-4 w-4 text-gray-500" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation()
                                     setEditingId(item.id)
                                     setEditQuestions(item.questions || item.question.split(' | ').filter((q: string) => q.trim() !== ''))
                                     setEditAnswer(item.answer)
@@ -846,59 +934,65 @@ export default function QAPage() {
                                     const images = Array.isArray(item.images) ? item.images : (item.metadata?.images && Array.isArray(item.metadata.images) ? item.metadata.images : [])
                                     setEditImages(images)
                                     setEditNewImages([])
-                                    setOpenDropdown(null)
                                   }}
-                                  className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 flex items-center gap-2"
                                 >
-                                  <Edit className="h-4 w-4" />
+                                  <Edit className="h-4 w-4 mr-2" />
                                   Edit
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setOpenDropdown(null)
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation()
                                     handleDeleteSingleItem(item.id)
                                   }}
-                                  className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 text-red-600 flex items-center gap-2"
+                                  className="text-red-600 focus:text-red-600"
                                 >
-                                  <Trash2 className="h-4 w-4" />
+                                  <Trash2 className="h-4 w-4 mr-2" />
                                   Delete
-                                </button>
-                              </div>
-                            )}
-                          </div>
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openQAViewer(item)
+                            }}
+                            className="p-1 hover:bg-gray-100 rounded transition-colors"
+                            title="View details"
+                          >
+                            <ChevronRight className="h-4 w-4 text-gray-500" />
+                          </button>
                         </div>
                       </div>
                     )}
-                  </div>
-                ))}
+                  ))}
                 </div>
+              )}
 
-                {/* Pagination Controls */}
-                <PaginationControls
-                  currentPage={currentPage}
-                  totalPages={totalPages}
-                  rowsPerPage={rowsPerPage}
-                  totalItems={filteredItems.length}
-                  onPageChange={goToPage}
-                  onRowsPerPageChange={(rows) => {
-                    setRowsPerPage(rows)
-                    // Clear selections when changing page size
-                    setSelectedItems(new Set())
-                  }}
-                  rowsPerPageOptions={[5, 10, 25, 50]}
-                  showPagination={showPagination}
-                  itemsRange={itemsRange}
-                  isFirstPage={isFirstPage}
-                  isLastPage={isLastPage}
-                  itemLabel="Q&A pair"
-                />
-              </>
-            )}
+              {/* Pagination Controls */}
+              <PaginationControls
+                currentPage={currentPage}
+                totalPages={totalPages}
+                rowsPerPage={rowsPerPage}
+                totalItems={filteredItems.length}
+                onPageChange={goToPage}
+                onRowsPerPageChange={(rows) => {
+                  setRowsPerPage(rows)
+                  // Clear selections when changing page size
+                  setSelectedItems(new Set())
+                }}
+                rowsPerPageOptions={[5, 10, 25, 50]}
+                showPagination={showPagination}
+                itemsRange={itemsRange}
+                isFirstPage={isFirstPage}
+                isLastPage={isLastPage}
+                itemLabel="Q&A pair"
+              />
+            </div>
           </div>
-          {/* Add padding at bottom */}
-          <div className="h-6"></div>
         </div>
       </div>
+    </div>
 
       {/* Right Sidebar */}
       <SourcesSidebar
@@ -924,7 +1018,8 @@ export default function QAPage() {
               Delete Q&A
             </h3>
             <p className="text-sm text-gray-500 text-center mb-6">
-              Are you sure you want to permanently delete {deleteConfirmation.items?.size || 0} source{deleteConfirmation.items?.size !== 1 ? 's' : ''}? All untrained sources will be permanently deleted and cannot be restored.
+              Are you sure you want to delete {deleteConfirmation.items?.size || 0} Q&A pair{deleteConfirmation.items?.size !== 1 ? 's' : ''}?
+              Untrained Q&A pairs will be permanently deleted. Trained Q&A pairs will be removed but can be restored later.
             </p>
             <div className="flex gap-3">
               <Button

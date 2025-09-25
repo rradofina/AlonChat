@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { planService } from '@/lib/plans/plan-service'
 
 export interface SourceStats {
   totalSources: number
@@ -12,8 +13,8 @@ export interface SourceStats {
 export async function getAgentSourceStats(
   agentId: string
 ): Promise<SourceStats | null> {
-  const supabase = createClient()
-  
+  const supabase = await createClient()
+
   const { data: sources, error } = await supabase
     .from('agent_sources')
     .select('type, size_bytes, status')
@@ -35,12 +36,12 @@ export async function getAgentSourceStats(
 
   sources.forEach(source => {
     stats.totalSizeBytes += source.size_bytes || 0
-    
+
     if (!stats.sourcesByType[source.type]) {
       stats.sourcesByType[source.type] = 0
     }
     stats.sourcesByType[source.type]++
-    
+
     switch (source.status) {
       case 'pending':
       case 'processing':
@@ -61,12 +62,12 @@ export async function getAgentSourceStats(
 export async function calculateStorageUsage(
   projectId: string
 ): Promise<{ used: number; limit: number; percentage: number }> {
-  const supabase = createClient()
+  const supabase = await createClient()
 
-  // Get project settings for plan info
+  // Get user from project
   const { data: project } = await supabase
     .from('projects')
-    .select('settings')
+    .select('user_id')
     .eq('id', projectId)
     .single()
 
@@ -74,7 +75,13 @@ export async function calculateStorageUsage(
     return { used: 0, limit: 0, percentage: 0 }
   }
 
-  const plan = project.settings?.plan || 'free'
+  // Get user's subscription with plan details
+  const subscription = await planService.getUserSubscriptionWithPlan(project.user_id)
+
+  // Default to starter plan if no subscription
+  const limit = subscription?.plan
+    ? planService.getStorageLimitBytes(subscription.plan)
+    : 100 * 1024 * 1024 // Default 100MB for starter
 
   // Get all agents in project
   const { data: agents } = await supabase
@@ -83,7 +90,7 @@ export async function calculateStorageUsage(
     .eq('project_id', projectId)
 
   if (!agents || agents.length === 0) {
-    return { used: 0, limit: getStorageLimit(plan), percentage: 0 }
+    return { used: 0, limit, percentage: 0 }
   }
 
   // Get total size of all sources
@@ -94,22 +101,20 @@ export async function calculateStorageUsage(
     .in('agent_id', agentIds)
 
   const used = sources?.reduce((sum, s) => sum + (s.size_bytes || 0), 0) || 0
-  const limit = getStorageLimit(plan)
   const percentage = limit > 0 ? (used / limit) * 100 : 0
 
   return { used, limit, percentage }
 }
 
-export function getStorageLimit(plan: string): number {
-  const limits: Record<string, number> = {
-    free: 400 * 1024, // 400KB
-    starter: 11 * 1024 * 1024 * 1024, // 11GB
-    standard: 11 * 1024 * 1024 * 1024, // 11GB
-    plus: 11 * 1024 * 1024 * 1024, // 11GB
-    business: 11 * 1024 * 1024 * 1024, // 11GB
-    enterprise: 11 * 1024 * 1024 * 1024 // 11GB
+export async function getStorageLimit(userId: string): Promise<number> {
+  const subscription = await planService.getUserSubscriptionWithPlan(userId)
+
+  if (subscription?.plan) {
+    return planService.getStorageLimitBytes(subscription.plan)
   }
-  return limits[plan] || limits.free
+
+  // Default to starter plan storage if no subscription
+  return 100 * 1024 * 1024 // 100MB
 }
 
 export function formatBytes(bytes: number): string {

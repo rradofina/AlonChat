@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { FileText, Globe, MessageSquare, HelpCircle, ChevronRight, X, Plus } from 'lucide-react'
@@ -25,8 +25,31 @@ export default function NewAgentPage() {
   const [sources, setSources] = useState<Source[]>([])
   const [agentName, setAgentName] = useState('')
   const [isCreating, setIsCreating] = useState(false)
+  const [maxSize, setMaxSize] = useState(30 * 1024 * 1024) // Default 30 MB
   const router = useRouter()
   const supabase = createClient()
+
+  useEffect(() => {
+    // Fetch user's plan storage limit
+    const fetchStorageLimit = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      try {
+        const response = await fetch('/api/user/plan')
+        if (response.ok) {
+          const data = await response.json()
+          if (data.plan?.storage_limit_mb) {
+            setMaxSize(data.plan.storage_limit_mb * 1024 * 1024)
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch plan details:', error)
+      }
+    }
+
+    fetchStorageLimit()
+  }, [])
 
   const tabs = [
     { id: 'files' as SourceType, label: 'Files', icon: FileText },
@@ -36,7 +59,6 @@ export default function NewAgentPage() {
   ]
 
   const totalSize = sources.reduce((acc, source) => acc + source.size, 0)
-  const maxSize = 400 * 1024 // 400 KB
   const sizePercentage = (totalSize / maxSize) * 100
 
   const handleAddSource = (type: SourceType, data: any, name: string, size: number) => {

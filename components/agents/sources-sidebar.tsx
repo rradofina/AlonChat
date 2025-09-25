@@ -13,12 +13,14 @@ interface SourcesSidebarProps {
 
 export default function SourcesSidebar({ agentId, showRetrainingAlert, refreshTrigger }: SourcesSidebarProps) {
   const { toast } = useToast()
+  const [isTraining, setIsTraining] = useState(false)
   const [stats, setStats] = useState({
     files: { count: 0, sizeKb: 0 },
     text: { count: 0, sizeKb: 0 },
     website: { count: 0, sizeKb: 0 },
     qa: { count: 0, sizeKb: 0 },
-    total: { count: 0, sizeKb: 0 }
+    total: { count: 0, sizeKb: 0 },
+    storageLimitKb: 30 * 1024 // Default 30MB
   })
 
   useEffect(() => {
@@ -123,13 +125,13 @@ export default function SourcesSidebar({ agentId, showRetrainingAlert, refreshTr
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium text-gray-700">Total size</span>
             <span className="text-sm text-gray-600">
-              {formatBytes(stats.total.sizeKb)} / 400 KB
+              {formatBytes(stats.total.sizeKb)} / {formatBytes(stats.storageLimitKb)}
             </span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2">
             <div
               className="bg-gray-900 h-2 rounded-full transition-all"
-              style={{ width: `${Math.min((stats.total.sizeKb / 400) * 100, 100)}%` }}
+              style={{ width: `${Math.min((stats.total.sizeKb / stats.storageLimitKb) * 100, 100)}%` }}
             />
           </div>
         </div>
@@ -137,16 +139,45 @@ export default function SourcesSidebar({ agentId, showRetrainingAlert, refreshTr
         {/* Retrain Button */}
         <Button
           className="w-full bg-gray-900 hover:bg-gray-800 text-white"
-          onClick={() => {
-            toast({
-              title: 'Info',
-              description: 'Retraining will be implemented with processing pipeline',
-            })
+          onClick={async () => {
+            if (isTraining) return
+
+            setIsTraining(true)
+            try {
+              const response = await fetch(`/api/agents/${agentId}/train`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+              })
+
+              if (!response.ok) {
+                throw new Error('Failed to train agent')
+              }
+
+              const data = await response.json()
+              toast({
+                title: 'Success',
+                description: data.message,
+              })
+
+              // Refresh stats after training
+              await fetchStats()
+
+              // Trigger parent refresh if needed
+              window.location.reload()
+            } catch (error) {
+              toast({
+                title: 'Error',
+                description: 'Failed to train agent',
+                variant: 'destructive',
+              })
+            } finally {
+              setIsTraining(false)
+            }
           }}
-          disabled={!showRetrainingAlert}
+          disabled={!showRetrainingAlert || isTraining}
         >
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Retrain agent
+          <RefreshCw className={`h-4 w-4 mr-2 ${isTraining ? 'animate-spin' : ''}`} />
+          {isTraining ? 'Training...' : 'Retrain agent'}
         </Button>
 
         {/* Retraining Alert */}

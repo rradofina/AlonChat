@@ -97,14 +97,9 @@ export function UploadStatusModal({ files, onClose, onRetry, onRemove }: UploadS
             <button
               onClick={() => setIsExpanded(!isExpanded)}
               className="p-1.5 hover:bg-gray-100 rounded transition-colors"
+              title={isExpanded ? "Minimize" : "Expand"}
             >
               {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-            </button>
-            <button
-              onClick={onClose}
-              className="p-1.5 hover:bg-gray-100 rounded transition-colors"
-            >
-              <X className="h-4 w-4" />
             </button>
           </div>
         </div>

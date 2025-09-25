@@ -18,13 +18,33 @@ interface FileViewerProps {
 
 export function FileViewer({ file, onBack }: FileViewerProps) {
   const [content, setContent] = useState<string>('')
+  const [isLoadingContent, setIsLoadingContent] = useState(true)
 
   useEffect(() => {
-    // Set up content and pages
-    if (file.content) {
-      setContent(file.content)
+    // Fetch content from API
+    const fetchContent = async () => {
+      if (!file.id || !file.agent_id) {
+        setIsLoadingContent(false)
+        return
+      }
+
+      try {
+        setIsLoadingContent(true)
+        const response = await fetch(`/api/agents/${file.agent_id}/sources/${file.id}/content`)
+        const data = await response.json()
+
+        if (data.content) {
+          setContent(data.content)
+        }
+      } catch (error) {
+        console.error('Error fetching content:', error)
+      } finally {
+        setIsLoadingContent(false)
+      }
     }
-  }, [file])
+
+    fetchContent()
+  }, [file.id, file.agent_id])
 
   const formatBytes = (bytes: number) => {
     if (!bytes) return '0 B'
@@ -52,6 +72,12 @@ export function FileViewer({ file, onBack }: FileViewerProps) {
     switch (file.status) {
       case 'ready':
         return 'Ready'
+      case 'new':
+        return 'New'
+      case 'removed':
+        return 'Removed'
+      case 'restored':
+        return 'Restored'
       case 'processing':
         return 'Processing...'
       case 'failed':
@@ -59,21 +85,27 @@ export function FileViewer({ file, onBack }: FileViewerProps) {
       case 'error':
         return 'Error'
       default:
-        return 'Pending'
+        return 'New'
     }
   }
 
   const statusBadgeClasses = (() => {
     switch (file.status) {
       case 'ready':
-        return 'bg-green-100 text-green-700 border border-green-200'
+        return 'bg-green-50 text-green-700 border border-green-300'
+      case 'new':
+        return 'bg-blue-50 text-blue-700 border border-blue-300'
+      case 'removed':
+        return 'bg-red-50 text-red-700 border border-red-300'
+      case 'restored':
+        return 'bg-yellow-50 text-yellow-700 border border-yellow-300'
       case 'processing':
-        return 'bg-blue-100 text-blue-700 border border-blue-200'
+        return 'bg-blue-50 text-blue-700 border border-blue-300'
       case 'error':
       case 'failed':
-        return 'bg-red-100 text-red-700 border border-red-200'
+        return 'bg-red-50 text-red-700 border border-red-300'
       default:
-        return 'bg-gray-100 text-gray-700 border border-gray-200'
+        return 'bg-blue-50 text-blue-700 border border-blue-300'
     }
   })()
 
@@ -136,7 +168,14 @@ export function FileViewer({ file, onBack }: FileViewerProps) {
         {/* Document Content */}
         <div className="flex-1 overflow-y-auto bg-gray-50 p-8">
           <div className="w-full">
-            {content ? (
+            {isLoadingContent ? (
+              <div className="bg-white rounded-lg border border-gray-200 p-8">
+                <div className="flex flex-col items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 text-blue-500 animate-spin mb-4" />
+                  <p className="text-gray-500">Loading content...</p>
+                </div>
+              </div>
+            ) : content ? (
               <div className="bg-white rounded-lg border border-gray-200 p-8">
                 <div className="mb-4 text-xs uppercase tracking-wide text-gray-400">
                   {file.name}

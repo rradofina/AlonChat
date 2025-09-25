@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { ChunkManager } from '@/lib/services/chunk-manager'
 
 export async function POST(
   request: NextRequest,
@@ -48,7 +49,7 @@ export async function POST(
     }
 
 
-    // Insert Q&A into database
+    // Insert Q&A into database (without content for chunking)
     const { data: source, error: sourceError } = await supabase
       .from('sources')
       .insert({
@@ -56,9 +57,11 @@ export async function POST(
         project_id: agent.project_id,
         type: 'qa',
         name: name,
-        content: JSON.stringify({ questions: questionsArray, answer }), // Store as array
+        content: '', // Don't store content directly - will use chunks
         size_kb: sizeKb,
-        status: 'ready', // Set to ready since Q&A doesn't need processing
+        status: 'chunking', // Mark as chunking while we process
+        is_trained: false, // Explicitly set to false - Q&As are not trained until training is run
+        chunk_count: 0,
         metadata: metadata
       })
       .select()
@@ -82,6 +85,52 @@ export async function POST(
       )
     }
 
+    // Store Q&A content in chunks for RAG
+    const qaContent = JSON.stringify({ questions: questionsArray, answer })
+    try {
+      const chunkCount = await ChunkManager.storeChunks({
+        sourceId: source.id,
+        agentId: params.id,
+        projectId: agent.project_id,
+        content: qaContent,
+        metadata: {
+          title: name,
+          type: 'qa',
+          questions: questionsArray,
+          has_images: metadata.has_images
+        },
+        chunkSize: 2000, // Smaller chunks for Q&A
+        chunkOverlap: 200 // Less overlap for Q&A
+      })
+
+      console.log(`Created ${chunkCount} chunks for Q&A source ${source.id}`)
+
+      // Update source with chunk count and mark as ready
+      const { error: updateError } = await supabase
+        .from('sources')
+        .update({
+          chunk_count: chunkCount,
+          status: 'ready',
+          content: qaContent // Store Q&A content for backward compatibility
+        })
+        .eq('id', source.id)
+
+      if (updateError) {
+        console.error('Error updating Q&A source status:', updateError)
+        // Don't fail the whole operation, source is created
+      }
+    } catch (chunkError) {
+      console.error('Error creating chunks for Q&A:', chunkError)
+      // Update status to indicate chunking failed but source exists
+      await supabase
+        .from('sources')
+        .update({
+          status: 'ready', // Mark as ready anyway since Q&A can work without chunks
+          content: qaContent, // Store content directly as fallback
+          error_message: 'Chunking failed but Q&A is available'
+        })
+        .eq('id', source.id)
+    }
 
     // Format for frontend
     const formattedSource = {
@@ -128,6 +177,7 @@ export async function GET(
       .select('*')
       .eq('agent_id', params.id)
       .eq('type', 'qa')
+      .neq('status', 'removed') // Don't show soft-deleted Q&As
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -307,19 +357,100 @@ export async function DELETE(
       )
     }
 
-    // Delete from database
-    const { error } = await supabase
+    // Get sources to check if they're trained
+    const { data: sources, error: fetchError } = await supabase
       .from('sources')
-      .delete()
+      .select('id, is_trained')
       .in('id', sourceIds)
       .eq('agent_id', params.id)
 
-    if (error) {
-      console.error('Delete error:', error)
+    if (fetchError) {
+      console.error('Error fetching sources:', fetchError)
       return NextResponse.json(
-        { error: 'Failed to delete Q&A' },
+        { error: 'Failed to fetch sources' },
         { status: 500 }
       )
+    }
+
+    if (!sources || sources.length === 0) {
+      return NextResponse.json(
+        { error: 'No sources found' },
+        { status: 404 }
+      )
+    }
+
+    // Separate trained and untrained sources
+    const trainedIds = sources.filter(s => s.is_trained).map(s => s.id)
+    const untrainedIds = sources.filter(s => !s.is_trained).map(s => s.id)
+
+    // Soft delete trained sources (mark as 'removed')
+    if (trainedIds.length > 0) {
+      const { error: softDeleteError } = await supabase
+        .from('sources')
+        .update({
+          status: 'removed',
+          updated_at: new Date().toISOString()
+        })
+        .in('id', trainedIds)
+        .eq('agent_id', params.id)
+
+      if (softDeleteError) {
+        console.error('Soft delete error:', softDeleteError)
+        return NextResponse.json(
+          { error: 'Failed to remove trained Q&A pairs' },
+          { status: 500 }
+        )
+      }
+      console.log(`Soft deleted ${trainedIds.length} trained Q&A sources`)
+    }
+
+    // Hard delete untrained sources
+    if (untrainedIds.length > 0) {
+      // First delete any associated chunks to avoid foreign key constraint issues
+      const { error: chunkDeleteError } = await supabase
+        .from('source_chunks')
+        .delete()
+        .in('source_id', untrainedIds)
+
+      if (chunkDeleteError) {
+        console.error('Error deleting chunks:', chunkDeleteError)
+        // Continue anyway - chunks might not exist yet
+      }
+
+      const { error: hardDeleteError } = await supabase
+        .from('sources')
+        .delete()
+        .in('id', untrainedIds)
+        .eq('agent_id', params.id)
+
+      if (hardDeleteError) {
+        console.error('Hard delete error:', hardDeleteError)
+        return NextResponse.json(
+          { error: 'Failed to delete untrained Q&A pairs' },
+          { status: 500 }
+        )
+      }
+      console.log(`Hard deleted ${untrainedIds.length} untrained Q&A sources`)
+    }
+
+    // Update agent's source count
+    const { data: stats } = await supabase
+      .from('sources')
+      .select('type, size_kb')
+      .eq('agent_id', params.id)
+      .neq('status', 'removed')
+
+    if (stats) {
+      const totalSources = stats.length
+      const totalSizeKb = stats.reduce((sum, s) => sum + s.size_kb, 0)
+
+      await supabase
+        .from('agents')
+        .update({
+          total_sources: totalSources,
+          total_size_kb: totalSizeKb
+        })
+        .eq('id', params.id)
     }
 
     return NextResponse.json({

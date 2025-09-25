@@ -1,13 +1,15 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "mcp__supabase__execute_sql",
+      "mcp__supabase__get_logs"
+    ]
+  },
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "shadcn",
     "supabase",
     "github"
-  ],
-  "permissions": {
-    "allow": [
-      "Bash(dir:*)"
-    ]
-  }
+  ]
 }

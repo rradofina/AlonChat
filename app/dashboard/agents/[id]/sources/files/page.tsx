@@ -2,9 +2,19 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'next/navigation'
-import { Upload, FileText, AlertCircle, Loader2, Trash2, ChevronRight, X, RotateCw } from 'lucide-react'
+import { Upload, FileText, AlertCircle, Loader2, Trash2, ChevronRight, X, RotateCw, MoreHorizontal, Eye } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import SourcesSidebar from '@/components/agents/sources-sidebar'
 import { FloatingActionBar } from '@/components/ui/floating-action-bar'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -13,6 +23,13 @@ import { UploadStatusModal, type UploadingFile } from '@/components/ui/upload-st
 import { usePagination } from '@/hooks/usePagination'
 import { PaginationControls } from '@/components/ui/pagination-controls'
 import { CustomSelect } from '@/components/ui/custom-select'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator
+} from '@/components/ui/dropdown-menu'
 
 export default function FilesPage() {
   const params = useParams()
@@ -31,6 +48,12 @@ export default function FilesPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('Default')
   const processingQueueRef = useRef(false)
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    isOpen: boolean
+    fileIds: string[]
+    fileName?: string
+    onConfirm: () => void
+  }>({ isOpen: false, fileIds: [], onConfirm: () => {} })
 
   // Use the pagination hook
   const {
@@ -63,7 +86,7 @@ export default function FilesPage() {
       const interval = setInterval(async () => {
         // Fetch current files silently to check status
         try {
-          const response = await fetch(`/api/agents/${params.id}/sources/files`)
+          const response = await fetch(`/api/agents/${params.id}/sources/files?includeRemoved=true`)
           if (response.ok) {
             const data = await response.json()
             const currentFiles = data.sources || []
@@ -92,6 +115,7 @@ export default function FilesPage() {
       if (showLoader) {
         setIsLoading(true)
       }
+      // Don't include removed files by default - they'll be hidden from view
       const response = await fetch(`/api/agents/${params.id}/sources/files`)
       if (!response.ok) throw new Error('Failed to fetch files')
       const data = await response.json()
@@ -239,15 +263,8 @@ export default function FilesPage() {
             throw new Error(uploadedFile.error || 'File processing failed')
           }
 
-          // Update to processing
-          setUploadingFiles(prev => prev.map(f =>
-            f.id === fileId ? { ...f, status: 'processing' as const } : f
-          ))
-
-          // Simulate processing time
-          await new Promise(resolve => setTimeout(resolve, 1000))
-
-          // Update to success
+          // File uploaded successfully - immediately mark as success
+          // No artificial delay needed since backend already processed it
           setUploadingFiles(prev => prev.map(f =>
             f.id === fileId ? { ...f, status: 'success' as const } : f
           ))
@@ -295,10 +312,19 @@ export default function FilesPage() {
   }
 
   const handleDeleteSelected = async () => {
-    if (selectedFiles.length === 0) return
+    console.log('handleDeleteSelected called with selectedFiles:', selectedFiles)
+    if (selectedFiles.length === 0) {
+      console.log('No files selected, returning')
+      return
+    }
 
-    if (!confirm(`Delete ${selectedFiles.length} file(s)?`)) return
+    setDeleteConfirmation({
+      isOpen: true,
+      fileIds: selectedFiles,
+      fileName: selectedFiles.length > 1 ? `${selectedFiles.length} files` : undefined,
+      onConfirm: async () => {
 
+    console.log('Sending DELETE request for files:', selectedFiles)
     try {
       const response = await fetch(`/api/agents/${params.id}/sources/files`, {
         method: 'DELETE',
@@ -306,9 +332,12 @@ export default function FilesPage() {
         body: JSON.stringify({ sourceIds: selectedFiles }),
       })
 
+      console.log('Delete response status:', response.status)
       if (!response.ok) throw new Error('Failed to delete files')
 
       const data = await response.json()
+      console.log('Delete response data:', data)
+
       toast({
         title: 'Success',
         description: data.message,
@@ -318,13 +347,18 @@ export default function FilesPage() {
       setShowRetrainingAlert(true)
       setRefreshTrigger(prev => prev + 1)
       await fetchFiles(false)
+      setDeleteConfirmation({ isOpen: false, fileIds: [], onConfirm: () => {} })
     } catch (error) {
+      console.error('Delete error:', error)
       toast({
         title: 'Error',
         description: 'Failed to delete files',
         variant: 'destructive',
       })
+      setDeleteConfirmation({ isOpen: false, fileIds: [], onConfirm: () => {} })
     }
+      }
+    })
   }
 
   const formatBytes = (bytes: number) => {
@@ -509,6 +543,8 @@ export default function FilesPage() {
                       <div
                         className={`flex items-center justify-between py-3 hover:bg-gray-50 cursor-pointer transition-colors ${
                           selectedFiles.includes(file.id) ? 'bg-gray-50' : ''
+                        } ${
+                          file.status === 'removed' ? 'opacity-60' : ''
                         }`}
                       >
                           <div
@@ -524,7 +560,7 @@ export default function FilesPage() {
                             <Checkbox
                               checked={selectedFiles.includes(file.id)}
                               onChange={(e: any) => {
-                                e.stopPropagation()
+                                // Don't call stopPropagation here - it's handled by onClick
                                 if (e.target.checked) {
                                   setSelectedFiles([...selectedFiles, file.id])
                                 } else {
@@ -535,37 +571,228 @@ export default function FilesPage() {
                             />
                             <FileText className="h-5 w-5 text-gray-400" />
                             <div className="flex-1">
-                              <p className="text-sm font-medium text-gray-900">{file.name}</p>
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-medium text-gray-900">{file.name}</p>
+                                <span className={`text-xs px-2 py-0.5 rounded-md border ${
+                                  file.status === 'ready' ? 'bg-green-50 text-green-700 border-green-300' :
+                                  file.status === 'new' ? 'bg-blue-50 text-blue-700 border-blue-300' :
+                                  file.status === 'pending_processing' ? 'bg-yellow-50 text-yellow-700 border-yellow-300' :
+                                  file.status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-300' :
+                                  file.status === 'chunking' ? 'bg-blue-50 text-blue-700 border-blue-300' :
+                                  file.status === 'removed' ? 'bg-red-50 text-red-700 border-red-300' :
+                                  file.status === 'restored' ? 'bg-yellow-50 text-yellow-700 border-yellow-300' :
+                                  file.status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-300' :
+                                  file.status === 'failed' ? 'bg-red-50 text-red-700 border-red-300' :
+                                  file.status === 'error' ? 'bg-red-50 text-red-700 border-red-300' :
+                                  'bg-blue-50 text-blue-700 border-blue-300'
+                                }`}>
+                                  {file.status === 'ready' ? 'Ready' :
+                                   file.status === 'new' ? 'New' :
+                                   file.status === 'pending_processing' ? 'Pending' :
+                                   file.status === 'processing' ? 'Processing' :
+                                   file.status === 'chunking' ? 'Chunking' :
+                                   file.status === 'removed' ? 'Removed' :
+                                   file.status === 'restored' ? 'Restored' :
+                                   file.status === 'processing' ? 'Processing...' :
+                                   file.status === 'failed' ? 'Failed' :
+                                   file.status === 'error' ? 'Error' :
+                                   'New'}
+                                </span>
+                              </div>
                               <p className="text-xs text-gray-500">
                                 {formatBytes(file.size_bytes || 0)} • {new Date(file.created_at).toLocaleDateString()}
                               </p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className={`text-xs px-2 py-1 rounded ${
-                              file.status === 'ready' ? 'bg-green-100 text-green-800' :
-                              file.status === 'processing' ? 'bg-blue-100 text-blue-800' :
-                              file.status === 'failed' ? 'bg-red-100 text-red-800' :
-                              file.status === 'error' ? 'bg-red-100 text-red-800' :
-                              'bg-yellow-100 text-yellow-800'
-                            }`}>
-                              {file.status === 'ready' ? 'Ready' :
-                               file.status === 'processing' ? 'Processing...' :
-                               file.status === 'failed' ? 'Failed' :
-                               file.status === 'error' ? 'Error' :
-                               'Pending'}
-                            </span>
-                            {file.status === 'ready' && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
+                          <div className="flex items-center gap-1">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="p-1 hover:bg-gray-100 rounded transition-colors"
+                                >
+                                  <MoreHorizontal className="h-4 w-4 text-gray-500" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                {(file.status === 'ready' || file.status === 'new') && (
+                                  <>
+                                    <DropdownMenuItem
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        openFileViewer(file.id)
+                                      }}
+                                    >
+                                      <Eye className="h-4 w-4 mr-2" />
+                                      View content
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                  </>
+                                )}
+                                {file.status === 'error' && (
+                                  <DropdownMenuItem
+                                    onClick={async (e) => {
+                                      e.stopPropagation()
+                                      try {
+                                        const response = await fetch(`/api/agents/${params.id}/sources/${file.id}/reprocess`, {
+                                          method: 'POST',
+                                        })
+
+                                        if (!response.ok) throw new Error('Failed to reprocess file')
+
+                                        toast({
+                                          title: 'Processing',
+                                          description: `Reprocessing "${file.name}"...`,
+                                        })
+
+                                        await fetchFiles(false)
+                                      } catch (error) {
+                                        toast({
+                                          title: 'Error',
+                                          description: 'Failed to reprocess file',
+                                          variant: 'destructive',
+                                        })
+                                      }
+                                    }}
+                                  >
+                                    <RotateCw className="h-4 w-4 mr-2" />
+                                    Retry Processing
+                                  </DropdownMenuItem>
+                                )}
+                                {file.status === 'removed' ? (
+                                  <>
+                                    <DropdownMenuItem
+                                      onClick={async (e) => {
+                                        e.stopPropagation()
+                                        try {
+                                          const response = await fetch(`/api/agents/${params.id}/sources/restore`, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ sourceIds: [file.id] }),
+                                          })
+
+                                          if (!response.ok) throw new Error('Failed to restore file')
+
+                                          const data = await response.json()
+                                          toast({
+                                            title: 'Success',
+                                            description: `File "${file.name}" has been restored`,
+                                          })
+
+                                          setShowRetrainingAlert(true)
+                                          await fetchFiles(false)
+                                        } catch (error) {
+                                          toast({
+                                            title: 'Error',
+                                            description: 'Failed to restore file',
+                                            variant: 'destructive',
+                                          })
+                                        }
+                                      }}
+                                    >
+                                      <RotateCw className="h-4 w-4 mr-2" />
+                                      Restore
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={async (e) => {
+                                        e.stopPropagation()
+                                        if (!confirm(`Permanently delete "${file.name}"? This action cannot be undone.`)) return
+
+                                        try {
+                                          const response = await fetch(`/api/agents/${params.id}/sources/permanent-delete`, {
+                                            method: 'DELETE',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ sourceIds: [file.id] }),
+                                          })
+
+                                          if (!response.ok) throw new Error('Failed to permanently delete file')
+
+                                          toast({
+                                            title: 'Success',
+                                            description: `File "${file.name}" has been permanently deleted`,
+                                          })
+
+                                          await fetchFiles(false)
+                                        } catch (error) {
+                                          toast({
+                                            title: 'Error',
+                                            description: 'Failed to permanently delete file',
+                                            variant: 'destructive',
+                                          })
+                                        }
+                                      }}
+                                      className="text-red-600 focus:text-red-600"
+                                    >
+                                      <Trash2 className="h-4 w-4 mr-2" />
+                                      Permanently Delete
+                                    </DropdownMenuItem>
+                                  </>
+                                ) : (
+                                  <DropdownMenuItem
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setDeleteConfirmation({
+                                        isOpen: true,
+                                        fileIds: [file.id],
+                                        fileName: file.name,
+                                        onConfirm: async () => {
+                                          try {
+                                            const response = await fetch(`/api/agents/${params.id}/sources/files`, {
+                                              method: 'DELETE',
+                                              headers: { 'Content-Type': 'application/json' },
+                                              body: JSON.stringify({ sourceIds: [file.id] }),
+                                            })
+
+                                            if (!response.ok) throw new Error('Failed to delete file')
+
+                                            const data = await response.json()
+                                            toast({
+                                              title: 'Success',
+                                              description: `File "${file.name}" has been deleted`,
+                                            })
+
+                                            setShowRetrainingAlert(true)
+                                            await fetchFiles(false)
+                                            setDeleteConfirmation({ isOpen: false, fileIds: [], onConfirm: () => {} })
+                                          } catch (error) {
+                                            toast({
+                                              title: 'Error',
+                                              description: 'Failed to delete file',
+                                              variant: 'destructive',
+                                            })
+                                            setDeleteConfirmation({ isOpen: false, fileIds: [], onConfirm: () => {} })
+                                          }
+                                        }
+                                      })
+                                    }}
+                                    className="text-red-600 focus:text-red-600"
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (file.status !== 'removed') {
                                   openFileViewer(file.id)
-                                }}
-                                className="p-1 hover:bg-gray-100 rounded transition-colors"
-                              >
-                                <ChevronRight className="h-4 w-4 text-gray-500" />
-                              </button>
-                            )}
+                                }
+                              }}
+                              className={`p-1 rounded transition-colors ${
+                                file.status === 'removed'
+                                  ? 'cursor-not-allowed'
+                                  : 'hover:bg-gray-100'
+                              }`}
+                              title={file.status === 'removed' ? 'Cannot view removed files' : 'View file details'}
+                              disabled={file.status === 'removed'}
+                            >
+                              <ChevronRight className={`h-4 w-4 ${
+                                file.status === 'removed' ? 'text-gray-300' : 'text-gray-500'
+                              }`} />
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -618,15 +845,84 @@ export default function FilesPage() {
       <FloatingActionBar
         selectedCount={selectedFiles.length}
         onDelete={handleDeleteSelected}
-        showRestore={files.some(f => f.status === 'removed')}
-        onRestore={() => {
-          // Handle restore functionality if needed
-          toast({
-            title: 'Restore',
-            description: 'Restore functionality coming soon'
+        showRestore={selectedFiles.some(id => {
+          const file = files.find(f => f.id === id)
+          return file?.status === 'removed'
+        })}
+        onRestore={async () => {
+          // Only restore selected files that are actually removed
+          const removedFileIds = selectedFiles.filter(id => {
+            const file = files.find(f => f.id === id)
+            return file?.status === 'removed'
           })
+
+          if (removedFileIds.length === 0) return
+
+          try {
+            const response = await fetch(`/api/agents/${params.id}/sources/restore`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sourceIds: removedFileIds }),
+            })
+
+            if (!response.ok) throw new Error('Failed to restore files')
+
+            const data = await response.json()
+            toast({
+              title: 'Success',
+              description: data.message,
+            })
+
+            setSelectedFiles([])
+            setShowRetrainingAlert(true)
+            await fetchFiles(false)
+          } catch (error) {
+            toast({
+              title: 'Error',
+              description: 'Failed to restore files',
+              variant: 'destructive',
+            })
+          }
         }}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteConfirmation.isOpen} onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          setDeleteConfirmation({ isOpen: false, fileIds: [], onConfirm: () => {} })
+        }
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete file</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {deleteConfirmation.fileName || 'this source'}?
+              {deleteConfirmation.fileIds.length === 1 ? (
+                <>
+                  This action will remove the file from your sources.
+                  Untrained files will be permanently deleted.
+                  Trained files will be removed and permanently deleted when you retrain your agent.
+                </>
+              ) : (
+                <>
+                  This action will remove the selected files from your sources.
+                  Untrained files will be permanently deleted.
+                  Trained files will be removed and permanently deleted when you retrain your agent.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteConfirmation.onConfirm}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

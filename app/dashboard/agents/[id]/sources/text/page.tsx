@@ -4,15 +4,31 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import { AlertCircle, Loader2, Trash2, Edit2, Save, X, MoreHorizontal, Edit, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import SourcesSidebar from '@/components/agents/sources-sidebar'
+import { TextViewer } from '@/components/agents/text-viewer'
 import { CustomSelect } from '@/components/ui/custom-select'
 import { FloatingActionBar } from '@/components/ui/floating-action-bar'
 import { Checkbox } from '@/components/ui/checkbox'
 import { usePagination } from '@/hooks/usePagination'
 import { PaginationControls } from '@/components/ui/pagination-controls'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator
+} from '@/components/ui/dropdown-menu'
 
 export default function TextPage() {
   const params = useParams()
@@ -24,34 +40,23 @@ export default function TextPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [textSources, setTextSources] = useState<any[]>([])
   const [selectedSources, setSelectedSources] = useState<string[]>([])
-  const [editingSource, setEditingSource] = useState<string | null>(null)
-  const [editTitle, setEditTitle] = useState('')
-  const [editContent, setEditContent] = useState('')
+  const [viewingText, setViewingText] = useState<any | null>(null)
   const [totalSize, setTotalSize] = useState(0)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
-  const [openDropdown, setOpenDropdown] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('Default')
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    isOpen: boolean
+    sourceIds: string[]
+    sourceName?: string
+    onConfirm: () => void
+  }>({ isOpen: false, sourceIds: [], onConfirm: () => {} })
 
   useEffect(() => {
     if (params.id) {
       fetchTextSources()
     }
   }, [params.id])
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (openDropdown && !(event.target as Element).closest('.dropdown-menu')) {
-        setOpenDropdown(null)
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [openDropdown])
 
   const fetchTextSources = async () => {
     try {
@@ -121,55 +126,15 @@ export default function TextPage() {
     }
   }
 
-  const handleUpdateSnippet = async (sourceId: string) => {
-    if (!editTitle.trim() || !editContent.trim()) {
-      toast({
-        title: 'Error',
-        description: 'Please provide both title and content',
-        variant: 'destructive',
-      })
-      return
-    }
-
-    try {
-      const response = await fetch(`/api/agents/${params.id}/sources/text`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sourceId,
-          title: editTitle,
-          content: editContent
-        }),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to update text snippet')
-      }
-
-      toast({
-        title: 'Success',
-        description: 'Text snippet updated successfully',
-      })
-
-      setEditingSource(null)
-      setShowRetrainingAlert(true)
-      setRefreshTrigger(prev => prev + 1)
-      await fetchTextSources()
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update text snippet',
-        variant: 'destructive',
-      })
-    }
-  }
 
   const handleDeleteSelected = async () => {
     if (selectedSources.length === 0) return
 
-    if (!confirm(`Delete ${selectedSources.length} text snippet(s)?`)) return
+    setDeleteConfirmation({
+      isOpen: true,
+      sourceIds: selectedSources,
+      sourceName: selectedSources.length > 1 ? `${selectedSources.length} text snippets` : undefined,
+      onConfirm: async () => {
 
     try {
       const response = await fetch(`/api/agents/${params.id}/sources/text`, {
@@ -190,13 +155,17 @@ export default function TextPage() {
       setShowRetrainingAlert(true)
       setRefreshTrigger(prev => prev + 1)
       await fetchTextSources()
+      setDeleteConfirmation({ isOpen: false, sourceIds: [], onConfirm: () => {} })
     } catch (error) {
       toast({
         title: 'Error',
         description: 'Failed to delete text snippets',
         variant: 'destructive',
       })
+      setDeleteConfirmation({ isOpen: false, sourceIds: [], onConfirm: () => {} })
     }
+      }
+    })
   }
 
   const formatBytes = (bytes: number) => {
@@ -207,16 +176,43 @@ export default function TextPage() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
-  const startEditing = (source: any) => {
-    setEditingSource(source.id)
-    setEditTitle(source.name)
-    setEditContent(source.content || '')
+  const openTextViewer = (source: any) => {
+    setViewingText(source)
   }
 
-  const cancelEditing = () => {
-    setEditingSource(null)
-    setEditTitle('')
-    setEditContent('')
+  const handleTextUpdate = () => {
+    setShowRetrainingAlert(true)
+    setRefreshTrigger(prev => prev + 1)
+    fetchTextSources()
+  }
+
+  const handleTextDelete = async (id: string) => {
+    try {
+      const response = await fetch(`/api/agents/${params.id}/sources/text`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceIds: [id] }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to delete text')
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Text snippet deleted successfully',
+      })
+
+      setViewingText(null)
+      setShowRetrainingAlert(true)
+      await fetchTextSources()
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete text',
+        variant: 'destructive',
+      })
+    }
   }
 
   const processedSources = textSources
@@ -232,9 +228,9 @@ export default function TextPage() {
           return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         case 'Oldest':
           return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        case 'Alphabetical (A-Z)':
+        case 'Name (A-Z)':
           return (a.name || '').localeCompare(b.name || '')
-        case 'Alphabetical (Z-A)':
+        case 'Name (Z-A)':
           return (b.name || '').localeCompare(a.name || '')
         case 'Size (Smallest)':
           return (a.size_bytes || 0) - (b.size_bytes || 0)
@@ -267,10 +263,22 @@ export default function TextPage() {
 
   const allPageSelected = currentSources.length > 0 && currentSources.every(source => selectedSources.includes(source.id))
 
+  // Show TextViewer when viewing a text snippet
+  if (viewingText) {
+    return (
+      <TextViewer
+        text={viewingText}
+        onBack={() => setViewingText(null)}
+        onDelete={handleTextDelete}
+        onUpdate={handleTextUpdate}
+      />
+    )
+  }
+
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-full bg-white">
       {/* Main Content Area */}
-      <div className="flex-1 p-8 pb-24">
+      <div className="flex-1 px-8 pt-8 pb-4 bg-white min-h-full overflow-y-auto">
         <div className="mx-auto w-full max-w-6xl">
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">Text</h1>
           <p className="text-sm text-gray-600 mb-6">
@@ -290,39 +298,39 @@ export default function TextPage() {
           )}
 
           {/* Add Text Snippet Section */}
-          <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
-            <div className="p-6">
+          <div className="bg-gray-50 border-2 border-gray-200 border-dashed rounded-lg">
+            <div className="p-8">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Add text snippet</h2>
 
               <div className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">Title</label>
-                  <Input
+                  <input
                     type="text"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Ex: Company policies, Product descriptions"
-                    className="w-full"
+                    placeholder="Title (e.g., Company policies, Product descriptions)"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-gray-400 placeholder-gray-400"
                   />
                 </div>
 
                 <div>
-                  <Textarea
+                  <textarea
                     value={textContent}
                     onChange={(e) => setTextContent(e.target.value)}
                     placeholder="Enter your text content here..."
-                    className="min-h-[200px] resize-none"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-gray-400 placeholder-gray-400 min-h-[150px] resize-none"
                   />
                   <div className="text-right text-xs text-gray-500 mt-1">
-                    {new TextEncoder().encode(textContent).length} B
+                    {formatBytes(new TextEncoder().encode(textContent).length)}
                   </div>
                 </div>
 
                 <div className="flex justify-end">
                   <Button
                     onClick={handleAddSnippet}
-                    className="bg-gray-900 hover:bg-gray-800 text-white"
-                    disabled={isSaving}
+                    variant="outline"
+                    className="border-gray-300"
+                    disabled={isSaving || !title.trim() || !textContent.trim()}
                   >
                     {isSaving ? (
                       <>
@@ -342,9 +350,10 @@ export default function TextPage() {
           <div className="mt-8">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Text sources</h2>
 
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-              <div>
-                <label className="flex items-center gap-2 text-sm text-gray-700 hover:text-gray-900 cursor-pointer">
+            {/* Controls row */}
+            <div className="mb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
                   <Checkbox
                     checked={allPageSelected}
                     onChange={() => {
@@ -358,92 +367,62 @@ export default function TextPage() {
                       }
                     }}
                   />
-                  <span>Select all</span>
-                </label>
-                {selectedSources.length > 0 && (
-                  <span className="block text-sm text-gray-500 mt-1">
-                    {selectedSources.length} item(s) selected
-                  </span>
-                )}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-4">
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Search..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
-                  />
+                  <span className="text-sm text-gray-600">Select all</span>
+                  {selectedSources.length > 0 && (
+                    <span className="ml-2 text-sm text-gray-500">
+                      {selectedSources.length} item(s) selected
+                    </span>
+                  )}
                 </div>
 
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-gray-700">Sort by:</span>
-                  <CustomSelect
-                    value={sortBy}
-                    onChange={setSortBy}
-                    options={['Default', 'Newest', 'Oldest', 'Alphabetical (A-Z)', 'Alphabetical (Z-A)', 'Size (Smallest)', 'Size (Largest)']}
-                  />
-                </div>
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Search..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
+                    />
+                  </div>
 
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-gray-700">Sort by:</span>
+                    <CustomSelect
+                      value={sortBy}
+                      onChange={setSortBy}
+                      options={['Default', 'Newest', 'Oldest', 'Name (A-Z)', 'Name (Z-A)', 'Size (Smallest)', 'Size (Largest)']}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="bg-white border border-gray-200 rounded-lg">
-              <div className="p-6">
-                {isLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+            {/* Text Sources List - No container, ultra-minimal */}
+            <div>
+              {isLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                </div>
+              ) : currentSources.length === 0 ? (
+                <div className="flex items-center justify-center text-center py-12">
+                  <div>
+                    <Edit2 className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                    <p className="text-sm font-medium text-gray-900">No text snippets</p>
+                    <p className="text-xs text-gray-500 mt-1">Add text snippets to get started</p>
                   </div>
-                ) : textSources.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-sm text-gray-500">No text snippets yet</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {currentSources.map((source) => (
-                      <div key={source.id}>
-                        {editingSource === source.id ? (
-                          // Edit mode
-                          <div className="p-4 bg-gray-50 rounded-lg">
-                            <Input
-                              value={editTitle}
-                              onChange={(e) => setEditTitle(e.target.value)}
-                              className="mb-3"
-                              placeholder="Title"
-                            />
-                            <Textarea
-                              value={editContent}
-                              onChange={(e) => setEditContent(e.target.value)}
-                              className="min-h-[100px] mb-3"
-                              placeholder="Content"
-                            />
-                            <div className="flex gap-2">
-                              <Button
-                                size="sm"
-                                onClick={() => handleUpdateSnippet(source.id)}
-                                className="bg-gray-900 hover:bg-gray-800"
-                              >
-                                <Save className="h-3 w-3 mr-1" />
-                                Save
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={cancelEditing}
-                              >
-                                <X className="h-3 w-3 mr-1" />
-                                Cancel
-                              </Button>
-                            </div>
-                          </div>
-                        ) : (
-                          // Display mode
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {currentSources.map((source) => (
+                    <div key={source.id}>
+                      <div
+                          className={`flex items-center justify-between py-3 hover:bg-gray-50 cursor-pointer transition-colors ${
+                            selectedSources.includes(source.id) ? 'bg-gray-50' : ''
+                          }`}
+                        >
                           <div
-                            className={`flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors ${
-                              selectedSources.includes(source.id) ? 'bg-gray-100' : ''
-                            }`}
+                            className="flex items-center gap-3 flex-1"
                             onClick={() => {
                               if (selectedSources.includes(source.id)) {
                                 setSelectedSources(selectedSources.filter(id => id !== source.id))
@@ -452,82 +431,120 @@ export default function TextPage() {
                               }
                             }}
                           >
-                            <div className="flex items-center gap-3 flex-1">
-                              <Checkbox
-                                checked={selectedSources.includes(source.id)}
-                                onChange={(e: any) => {
-                                  e.stopPropagation()
-                                  if (e.target.checked) {
-                                    setSelectedSources([...selectedSources, source.id])
-                                  } else {
-                                    setSelectedSources(selectedSources.filter(id => id !== source.id))
-                                  }
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                              />
-                              <div className="flex-1">
+                            <Checkbox
+                              checked={selectedSources.includes(source.id)}
+                              onChange={(e: any) => {
+                                e.stopPropagation()
+                                if (e.target.checked) {
+                                  setSelectedSources([...selectedSources, source.id])
+                                } else {
+                                  setSelectedSources(selectedSources.filter(id => id !== source.id))
+                                }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <Edit2 className="h-5 w-5 text-gray-400" />
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
                                 <p className="text-sm font-medium text-gray-900">{source.name}</p>
-                                <p className="text-xs text-gray-500 mt-1">
-                                  {formatBytes(source.size_bytes || 0)} • {new Date(source.created_at).toLocaleDateString()}
-                                </p>
+                                <span className={`text-xs px-2 py-0.5 rounded-md border ${
+                                  source.status === 'processed' || source.status === 'ready' ? 'bg-green-50 text-green-700 border-green-300' :
+                                  source.status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-300' :
+                                  source.status === 'failed' || source.status === 'error' ? 'bg-red-50 text-red-700 border-red-300' :
+                                  'bg-blue-50 text-blue-700 border-blue-300'
+                                }`}>
+                                  {source.status === 'processed' || source.status === 'ready' ? 'Ready' :
+                                   source.status === 'processing' ? 'Processing' :
+                                   source.status === 'failed' || source.status === 'error' ? 'Failed' :
+                                   'New'}
+                                </span>
                               </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className={`text-xs px-2 py-1 rounded ${
-                                source.status === 'processed' ? 'bg-green-100 text-green-800' :
-                                source.status === 'processing' ? 'bg-blue-100 text-blue-800' :
-                                'bg-yellow-100 text-yellow-800'
-                              }`}>
-                                {source.status || 'pending'}
-                              </span>
-
-                              {/* Actions Menu */}
-                              <div className="relative dropdown-menu">
-                                <button
-                                  className="p-1 hover:bg-gray-200 rounded"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setOpenDropdown(openDropdown === source.id ? null : source.id)
-                                  }}
-                                >
-                                  <MoreHorizontal className="h-4 w-4 text-gray-600" />
-                                </button>
-                                {openDropdown === source.id && (
-                                  <div className="absolute right-0 mt-2 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        startEditing(source)
-                                        setOpenDropdown(null)
-                                      }}
-                                      className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 flex items-center gap-2"
-                                    >
-                                      <Edit className="h-4 w-4" />
-                                      Edit
-                                    </button>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        setSelectedSources([source.id])
-                                        handleDeleteSelected()
-                                        setOpenDropdown(null)
-                                      }}
-                                      className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 text-red-600 flex items-center gap-2"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                      Delete
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
+                              <p className="text-xs text-gray-500">
+                                {formatBytes(source.size_bytes || 0)} • {new Date(source.created_at).toLocaleDateString()}
+                              </p>
                             </div>
                           </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                          <div className="flex items-center gap-1">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="p-1 hover:bg-gray-100 rounded transition-colors"
+                                >
+                                  <MoreHorizontal className="h-4 w-4 text-gray-500" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    openTextViewer(source)
+                                  }}
+                                >
+                                  <Edit className="h-4 w-4 mr-2" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setDeleteConfirmation({
+                                      isOpen: true,
+                                      sourceIds: [source.id],
+                                      sourceName: source.name,
+                                      onConfirm: async () => {
+                                        try {
+                                          const response = await fetch(`/api/agents/${params.id}/sources/text`, {
+                                            method: 'DELETE',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ sourceIds: [source.id] }),
+                                          })
+
+                                          if (!response.ok) throw new Error('Failed to delete text snippet')
+
+                                          const data = await response.json()
+                                          toast({
+                                            title: 'Success',
+                                            description: `Text snippet "${source.name}" has been deleted`,
+                                          })
+
+                                          setShowRetrainingAlert(true)
+                                          await fetchTextSources()
+                                          setDeleteConfirmation({ isOpen: false, sourceIds: [], onConfirm: () => {} })
+                                        } catch (error) {
+                                          toast({
+                                            title: 'Error',
+                                            description: 'Failed to delete text snippet',
+                                            variant: 'destructive',
+                                          })
+                                          setDeleteConfirmation({ isOpen: false, sourceIds: [], onConfirm: () => {} })
+                                        }
+                                      }
+                                    })
+                                  }}
+                                  className="text-red-600 focus:text-red-600"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openTextViewer(source)
+                              }}
+                              className="p-1 hover:bg-gray-100 rounded transition-colors"
+                              title="View details"
+                            >
+                              <ChevronRight className="h-4 w-4 text-gray-500" />
+                            </button>
+                          </div>
+                        </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Pagination Controls */}
@@ -547,11 +564,8 @@ export default function TextPage() {
               itemsRange={itemsRange}
               isFirstPage={isFirstPage}
               isLastPage={isLastPage}
-              itemLabel="text snippet"
             />
           </div>
-          {/* Add padding at bottom */}
-          <div className="h-6"></div>
         </div>
       </div>
 
@@ -567,6 +581,44 @@ export default function TextPage() {
         selectedCount={selectedSources.length}
         onDelete={handleDeleteSelected}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteConfirmation.isOpen} onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          setDeleteConfirmation({ isOpen: false, sourceIds: [], onConfirm: () => {} })
+        }
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete text snippet</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {deleteConfirmation.sourceName || 'this text snippet'}?
+              {deleteConfirmation.sourceIds.length === 1 ? (
+                <>
+                  {' '}This action will remove the text from your sources.
+                  Untrained texts will be permanently deleted.
+                  Trained texts will be removed and permanently deleted when you retrain your agent.
+                </>
+              ) : (
+                <>
+                  {' '}This action will remove the selected texts from your sources.
+                  Untrained texts will be permanently deleted.
+                  Trained texts will be removed and permanently deleted when you retrain your agent.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteConfirmation.onConfirm}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

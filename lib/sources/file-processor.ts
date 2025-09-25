@@ -140,11 +140,12 @@ export class FileProcessor {
 
   private static async processDOCX(file: File): Promise<ProcessedFile> {
     try {
-      // Convert File to ArrayBuffer
+      // Convert File to Buffer for mammoth
       const arrayBuffer = await file.arrayBuffer()
+      const buffer = Buffer.from(arrayBuffer)
 
-      // Process with mammoth
-      const result = await mammoth.extractRawText({ arrayBuffer })
+      // Process with mammoth - pass buffer directly
+      const result = await mammoth.extractRawText({ buffer })
 
       if (result.messages.length > 0) {
         console.warn('DOCX processing warnings:', result.messages)

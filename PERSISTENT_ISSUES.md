@@ -251,6 +251,131 @@ npm run dev
 
 ---
 
+## Issue #8: File Upload & Content Viewing Performance Issues
+
+### Symptoms
+- Files show "processing" forever or error out (even tiny 1kb files)
+- Content takes 7-8 seconds to load when clicking chevron icon
+- PDF shows "PDF processing temporarily disabled for performance"
+- Multiple "Download error: 400 Bad Request" in logs
+- Storage download taking 400ms-1400ms per request
+
+### Root Cause
+**ARCHITECTURAL FLAW**: Processing files on EVERY view instead of ONCE during upload
+- Content API was downloading file from storage and processing it every single time
+- PDF processing with pdfjs-dist taking 7-8 seconds for large files
+- No caching - same file processed repeatedly
+- Storage bucket mismatch (source-files vs agent-sources)
+
+### Our Debugging Journey (What NOT to do)
+1. **First Wrong Path**: Thought it was database constraints (invalid statuses like 'removed', 'restored')
+2. **Second Wrong Path**: Added artificial delays thinking it needed "processing time"
+3. **Third Wrong Path**: Fixed storage bucket mismatch but still had performance issues
+4. **Fourth Wrong Path**: Tried to optimize PDF processing in content API
+5. **CORRECT SOLUTION**: Process files ONCE during upload, store result in database
+
+### Solution
+```typescript
+// ✅ CORRECT - Process during upload (app/api/agents/[id]/sources/files/route.ts)
+const processedFile = await FileProcessor.processFile(file)
+const insertData = {
+  content: processedFile.content, // Store processed content
+  status: 'ready', // Mark as ready immediately
+  // ... other fields
+}
+
+// ✅ CORRECT - Return stored content instantly (app/api/agents/[id]/sources/[sourceId]/content/route.ts)
+if (source.content) {
+  return NextResponse.json({
+    content: source.content, // Return pre-processed content
+    status: source.status,
+    metadata: source.metadata
+  })
+}
+```
+
+### Key Learnings
+1. **ALWAYS trace the full data flow** before making changes
+2. **Don't optimize the wrong part** - we optimized viewing when upload was the problem
+3. **Production apps pre-process content** - never process on-demand for viewing
+4. **Check existing patterns** - the codebase already had a chunking system we ignored
+5. **Simple solutions are better** - storing in DB is simpler than complex caching
+
+### Prevention
+- Process heavy operations (PDF parsing, OCR, etc.) ONCE during upload
+- Store processed results in database for instant retrieval
+- Never do heavy processing in GET endpoints
+- Always question if you're solving the RIGHT problem
+
+### Files Affected
+- `app/api/agents/[id]/sources/files/route.ts` - Upload endpoint
+- `app/api/agents/[id]/sources/[sourceId]/content/route.ts` - Content viewing API
+- `lib/sources/file-processor.ts` - File processing logic
+- `components/agents/file-viewer.tsx` - Frontend viewer
+
+### Time Wasted
+**~2 hours** debugging wrong issues before finding the real architectural problem
+
+---
+
+## Issue #10: Refactoring Inline Editing to Viewer Pattern
+
+### Symptoms
+- Inline editing clutters the list view with forms
+- Inconsistent UX between Files and Text pages
+- Edit functionality mixed with list display logic
+
+### Root Cause
+- Initial implementation used inline editing directly in the list
+- No separation of concerns between listing and viewing/editing
+
+### Solution
+1. **Create separate viewer components** (FileViewer, TextViewer):
+```typescript
+// Create viewer component with view/edit modes
+export function TextViewer({ text, onBack, onDelete, onUpdate }: TextViewerProps) {
+  const [isEditMode, setIsEditMode] = useState(false)
+  // View and edit logic separated in the viewer
+}
+```
+
+2. **Remove inline editing from list pages**:
+```typescript
+// Replace inline edit state with viewer state
+const [viewingText, setViewingText] = useState<any | null>(null)
+
+// Change chevron onClick from startEditing to openTextViewer
+<button onClick={() => openTextViewer(source)}>
+  <ChevronRight />
+</button>
+```
+
+3. **Render viewer as full-screen overlay**:
+```typescript
+{viewingText && (
+  <div className="fixed inset-0 z-50 bg-white">
+    <TextViewer text={viewingText} ... />
+  </div>
+)}
+```
+
+### Key Pattern
+- **List Page**: Shows items, handles selection, bulk operations
+- **Viewer Component**: Shows single item detail, handles view/edit modes
+- **Clean Separation**: List logic stays in page, item logic in viewer
+
+### Files Affected
+- `app/dashboard/agents/[id]/sources/text/page.tsx` - Remove inline editing
+- `components/agents/text-viewer.tsx` - New viewer component
+- `components/agents/file-viewer.tsx` - Reference implementation
+
+### Prevention
+- Always separate list views from detail views
+- Use dedicated viewer components for item-level operations
+- Keep consistent UX patterns across similar features
+
+---
+
 ## Adding New Issues
 
 When documenting a new persistent issue, include:
@@ -290,5 +415,52 @@ taskkill /PID [process_id] /F
 
 ---
 
-*Last Updated: [Auto-update when adding new issues]*
+## Issue #9: Soft Delete, Restore, and Permanent Delete for Trained Files
+
+### Symptoms
+- Files that were used in training get permanently deleted
+- No way to restore files that were accidentally deleted but were part of training
+- Training model loses reference to deleted source files
+
+### Root Cause
+- No distinction between trained and untrained files for deletion
+- All files were hard deleted regardless of training status
+- Missing restore functionality for soft-deleted files
+
+### Solution
+1. **Add `is_trained` column to sources table**:
+```sql
+ALTER TABLE sources ADD COLUMN is_trained BOOLEAN DEFAULT FALSE;
+```
+
+2. **Implement soft delete for trained files** (app/api/agents/[id]/sources/files/route.ts):
+```typescript
+// Soft delete trained files
+if (trainedIds.length > 0) {
+  await supabase.from('sources').update({ status: 'removed' })
+}
+// Hard delete untrained files
+if (untrainedIds.length > 0) {
+  await supabase.from('sources').delete()
+}
+```
+
+3. **Create restore endpoint** (app/api/agents/[id]/sources/restore/route.ts)
+4. **Create permanent delete endpoint** (app/api/agents/[id]/sources/permanent-delete/route.ts)
+5. **Update UI to show removed files with Restore/Permanently Delete options**
+
+### Files Affected
+- `app/api/agents/[id]/sources/files/route.ts` - DELETE logic for soft/hard delete
+- `app/api/agents/[id]/sources/restore/route.ts` - New restore endpoint
+- `app/api/agents/[id]/sources/permanent-delete/route.ts` - New permanent delete endpoint
+- `app/dashboard/agents/[id]/sources/files/page.tsx` - UI for restore/permanent delete
+
+### Prevention
+- Always check training status before deleting
+- Implement proper soft delete patterns for referenced data
+- Provide clear UI distinction between regular delete and permanent delete
+
+---
+
+*Last Updated: January 25, 2025 - Added Issue #10: Refactoring Inline Editing to Viewer Pattern*
 *Remember to update this file when encountering issues that take multiple attempts to resolve!*

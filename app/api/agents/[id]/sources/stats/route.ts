@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { PlanService } from '@/lib/plans/plan-service'
 
 export async function GET(
   request: NextRequest,
@@ -8,6 +9,32 @@ export async function GET(
   const params = await props.params
   try {
     const supabase = await createClient()
+
+    // Get the agent's project and user to fetch plan info
+    const { data: agent, error: agentError } = await supabase
+      .from('agents')
+      .select('project_id, projects!inner(owner_id)')
+      .eq('id', params.id)
+      .single()
+
+    if (agentError || !agent) {
+      console.error('Error fetching agent:', agentError)
+      return NextResponse.json({
+        files: { count: 0, sizeKb: 0 },
+        text: { count: 0, sizeKb: 0 },
+        website: { count: 0, sizeKb: 0 },
+        qa: { count: 0, sizeKb: 0 },
+        total: { count: 0, sizeKb: 0 },
+        storageLimitKb: 30 * 1024 // Default 30MB
+      })
+    }
+
+    // Get user's subscription and plan
+    const planService = new PlanService(supabase)
+    const subscription = await planService.getUserSubscriptionWithPlan(agent.projects.owner_id)
+    const storageLimitKb = subscription?.plan
+      ? subscription.plan.storage_limit_mb * 1024
+      : 30 * 1024 // Default 30MB
 
     // Fetch all sources for this agent
     const { data: sources, error } = await supabase
@@ -18,15 +45,12 @@ export async function GET(
     if (error) {
       console.error('Error fetching stats:', error)
       return NextResponse.json({
-        totalSources: 0,
-        totalSize: 0,
-        maxSize: 400 * 1024 * 1024,
-        byType: {
-          files: { count: 0, size: 0 },
-          text: { count: 0, size: 0 },
-          website: { count: 0, pages: 0 },
-          qa: { count: 0, size: 0 }
-        }
+        files: { count: 0, sizeKb: 0 },
+        text: { count: 0, sizeKb: 0 },
+        website: { count: 0, sizeKb: 0 },
+        qa: { count: 0, sizeKb: 0 },
+        total: { count: 0, sizeKb: 0 },
+        storageLimitKb
       })
     }
 
@@ -36,7 +60,8 @@ export async function GET(
       text: { count: 0, sizeKb: 0 },
       website: { count: 0, sizeKb: 0 },
       qa: { count: 0, sizeKb: 0 },
-      total: { count: 0, sizeKb: 0 }
+      total: { count: 0, sizeKb: 0 },
+      storageLimitKb
     }
 
     // Aggregate data by type

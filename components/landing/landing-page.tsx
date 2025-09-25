@@ -34,15 +34,15 @@ export function LandingPage() {
       const response = await fetch('/api/auth/session')
       if (response.ok) {
         const data = await response.json()
-        if (data.user) {
-          // If user is logged in, redirect to dashboard
-          router.push('/dashboard')
-        }
         setIsLoggedIn(!!data.user)
+        // Optionally redirect to dashboard (you can remove this if you want them to stay on landing page)
+        // if (data.user) {
+        //   router.push('/dashboard')
+        // }
       }
     }
     checkAuth()
-  }, [router])
+  }, [])
 
   return (
     <div className="min-h-screen bg-white">
@@ -61,12 +61,20 @@ export function LandingPage() {
               <Link href="/pricing" className="text-gray-600 hover:text-gray-900">
                 Pricing
               </Link>
-              <Link href="/login">
-                <Button variant="ghost">Sign In</Button>
-              </Link>
-              <Link href="/signup">
-                <Button>Get Started</Button>
-              </Link>
+              {isLoggedIn ? (
+                <Link href="/dashboard">
+                  <Button>Dashboard</Button>
+                </Link>
+              ) : (
+                <>
+                  <Link href="/login">
+                    <Button variant="ghost">Sign In</Button>
+                  </Link>
+                  <Link href="/signup">
+                    <Button>Get Started</Button>
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -92,11 +100,19 @@ export function LandingPage() {
               engage customers naturally, and drive real results.
             </p>
             <div className="flex gap-4 justify-center">
-              <Link href="/signup">
-                <Button size="lg" className="gap-2">
-                  Start Building Free <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
+              {isLoggedIn ? (
+                <Link href="/dashboard">
+                  <Button size="lg" className="gap-2">
+                    Go to Dashboard <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </Link>
+              ) : (
+                <Link href="/signup">
+                  <Button size="lg" className="gap-2">
+                    Start Building Free <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </Link>
+              )}
               <Link href="/demo">
                 <Button size="lg" variant="outline" className="gap-2">
                   <MessageSquare className="h-4 w-4" /> Live Demo
@@ -417,11 +433,19 @@ export function LandingPage() {
             Join thousands of businesses using AlonChat to delight their customers
           </p>
           <div className="flex gap-4 justify-center">
-            <Link href="/signup">
-              <Button size="lg" variant="secondary" className="gap-2">
-                Start Free Trial <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
+            {isLoggedIn ? (
+              <Link href="/dashboard">
+                <Button size="lg" variant="secondary" className="gap-2">
+                  Go to Dashboard <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+            ) : (
+              <Link href="/signup">
+                <Button size="lg" variant="secondary" className="gap-2">
+                  Start Free Trial <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+            )}
             <Link href="/contact">
               <Button size="lg" variant="outline" className="bg-white/10 text-white border-white/20 hover:bg-white/20">
                 Contact Sales
