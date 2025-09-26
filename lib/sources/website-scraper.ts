@@ -31,6 +31,7 @@ export class WebsiteScraper {
   private fullPageContent: boolean
   private crawledUrls: Set<string> = new Set()
   private domain: string = ''
+  private baseDomain: string = ''
   private discoveredLinks: Set<string> = new Set()
   private onProgress?: (progress: CrawlProgress) => void | Promise<void>
 
@@ -49,6 +50,8 @@ export class WebsiteScraper {
     try {
       const url = new URL(startUrl)
       this.domain = url.hostname
+      // Extract base domain (remove www. prefix if present)
+      this.baseDomain = url.hostname.replace(/^www\./i, '')
     } catch {
       return [{
         url: startUrl,
@@ -109,8 +112,10 @@ export class WebsiteScraper {
           .filter(link => {
             try {
               const url = new URL(link)
-              // Only crawl same domain, no external links
-              return url.hostname === this.domain && !this.crawledUrls.has(link)
+              // Check if same domain (handle www vs non-www)
+              const linkBaseDomain = url.hostname.replace(/^www\./i, '')
+              const isSameDomain = linkBaseDomain === this.baseDomain
+              return isSameDomain && !this.crawledUrls.has(link)
             } catch {
               return false
             }
