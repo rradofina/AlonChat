@@ -30,7 +30,8 @@ export async function POST(
         status: 'processing',
         metadata: {
           ...source.metadata,
-          recrawl_started_at: new Date().toISOString()
+          recrawl_started_at: new Date().toISOString(),
+          discovered_links: []  // Clear discovered links for fresh crawl
         }
       })
       .eq('id', params.sourceId)
@@ -43,8 +44,8 @@ export async function POST(
 
     // Re-crawl the website
     const url = source.website_url || source.metadata?.url
-    const crawlSubpages = source.metadata?.crawl_subpages || false
-    const maxPages = source.metadata?.max_pages || 1
+    const crawlSubpages = source.metadata?.crawl_subpages !== false  // Default to true for re-crawl
+    const maxPages = source.metadata?.max_pages || 200  // Use default of 200 for re-crawl
 
     // Start crawling
     processWebsiteAsync(params.sourceId, params.id, source.project_id, url, crawlSubpages, maxPages)
@@ -75,10 +76,36 @@ async function processWebsiteAsync(
   const supabase = await createClient()
 
   try {
-    console.log(`Starting re-crawl for ${url}`)
+    console.log(`Starting re-crawl for ${url} with maxPages=${maxPages}, crawlSubpages=${crawlSubpages}`)
 
-    // Crawl the website
-    const results = await scrapeWebsite(url, maxPages, crawlSubpages)
+    // Set for discovered links
+    const discoveredLinks = new Set<string>()
+
+    // Progress callback to update database
+    const progressCallback = async (progress: any) => {
+      if (progress.discoveredLinks) {
+        progress.discoveredLinks.forEach((link: string) => discoveredLinks.add(link))
+      }
+
+      await supabase.from('sources').update({
+        status: 'processing',
+        metadata: {
+          url,
+          crawl_subpages: crawlSubpages,
+          max_pages: maxPages,
+          crawl_progress: {
+            current: progress.current,
+            total: progress.total,
+            currentUrl: progress.currentUrl,
+            phase: progress.phase
+          },
+          discovered_links: Array.from(discoveredLinks)
+        }
+      }).eq('id', sourceId)
+    }
+
+    // Crawl the website with progress tracking
+    const results = await scrapeWebsite(url, maxPages, crawlSubpages, progressCallback)
     const validPages = results.filter(page => !page.error && page.content)
 
     if (validPages.length === 0) {
@@ -143,6 +170,7 @@ async function processWebsiteAsync(
         max_pages: maxPages,
         pages_crawled: validPages.length,
         crawled_pages: validPages.map(p => p.url),
+        discovered_links: Array.from(discoveredLinks),
         sub_links: validPages.slice(1).map(p => ({
           url: p.url,
           title: p.title,

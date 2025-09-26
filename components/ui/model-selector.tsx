@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { Check, ChevronDown, Search, Sparkles, Bot, Zap, Brain, Cpu } from 'lucide-react'
+import { Check, ChevronDown, Sparkles, Bot, Brain, Cpu } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   Command,
@@ -103,8 +103,6 @@ export function ModelSelector({
   disabled = false,
 }: ModelSelectorProps) {
   const [open, setOpen] = React.useState(false)
-  const [search, setSearch] = React.useState('')
-  const [hoveredModel, setHoveredModel] = React.useState<string | null>(null)
 
   const selectedModel = models.find((model) => model.name === value)
 
@@ -119,24 +117,6 @@ export function ModelSelector({
     })
     return groups
   }, [models])
-
-  // Filter models based on search
-  const filteredGroups = React.useMemo(() => {
-    if (!search) return groupedModels
-
-    const filtered: Record<string, Model[]> = {}
-    Object.entries(groupedModels).forEach(([provider, models]) => {
-      const filteredModels = models.filter((model) =>
-        model.display_name.toLowerCase().includes(search.toLowerCase()) ||
-        model.name.toLowerCase().includes(search.toLowerCase()) ||
-        model.description?.toLowerCase().includes(search.toLowerCase())
-      )
-      if (filteredModels.length > 0) {
-        filtered[provider] = filteredModels
-      }
-    })
-    return filtered
-  }, [groupedModels, search])
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -168,138 +148,124 @@ export function ModelSelector({
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[400px] p-0" align="start">
-        <Command shouldFilter={false}>
-          <div className="flex items-center border-b px-3">
-            <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
-            <input
-              placeholder="Search models..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="flex h-10 w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            />
-          </div>
-          <CommandList className="max-h-[400px] overflow-auto">
-            {Object.keys(filteredGroups).length === 0 ? (
-              <div className="py-6 text-center text-sm text-muted-foreground">
-                No models found.
-              </div>
-            ) : (
-              Object.entries(filteredGroups).map(([provider, models]) => (
-                <CommandGroup
-                  key={provider}
-                  heading={
-                    <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                      <span className={providerColors[provider]}>
-                        {providerIcons[provider]}
-                      </span>
-                      {provider.charAt(0).toUpperCase() + provider.slice(1)}
-                    </div>
-                  }
-                >
-                  {models.map((model) => {
-                    const badge = getModelBadge(model)
-                    const isSelected = value === model.name
+        <Command>
+          <CommandInput placeholder="Search models..." />
+          <CommandEmpty>No model found.</CommandEmpty>
+          <CommandList>
+            {Object.entries(groupedModels).map(([provider, providerModels]) => (
+              <CommandGroup
+                key={provider}
+                heading={
+                  <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <span className={providerColors[provider]}>
+                      {providerIcons[provider]}
+                    </span>
+                    {provider.charAt(0).toUpperCase() + provider.slice(1)}
+                  </div>
+                }
+              >
+                {providerModels.map((model) => {
+                  const badge = getModelBadge(model)
+                  const isSelected = value === model.name
 
-                    return (
-                      <HoverCard key={model.id} openDelay={200}>
-                        <HoverCardTrigger asChild>
-                          <CommandItem
-                            value={model.name}
-                            onSelect={() => {
-                              onValueChange?.(model.name)
-                              setOpen(false)
-                            }}
-                            onMouseEnter={() => setHoveredModel(model.name)}
-                            onMouseLeave={() => setHoveredModel(null)}
-                            className="flex items-center justify-between py-2 cursor-pointer"
-                          >
-                            <div className="flex items-center gap-2">
-                              <Check
-                                className={cn(
-                                  'h-4 w-4',
-                                  isSelected ? 'opacity-100' : 'opacity-0'
-                                )}
-                              />
+                  return (
+                    <HoverCard key={model.id} openDelay={200} closeDelay={0}>
+                      <HoverCardTrigger asChild>
+                        <CommandItem
+                          value={`${model.display_name} ${model.name} ${model.provider}`}
+                          onSelect={(currentValue) => {
+                            // The onSelect receives the search value, but we want the model name
+                            onValueChange?.(model.name)
+                            setOpen(false)
+                          }}
+                          className="flex items-center justify-between py-2 cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Check
+                              className={cn(
+                                'h-4 w-4',
+                                isSelected ? 'opacity-100' : 'opacity-0'
+                              )}
+                            />
+                            <span className={providerColors[provider]}>
+                              {providerIcons[provider]}
+                            </span>
+                            <span className="text-sm">{model.display_name}</span>
+                            {badge && (
+                              <Badge variant="secondary" className={cn('text-xs px-1.5 py-0', badge.color)}>
+                                {badge.text}
+                              </Badge>
+                            )}
+                          </div>
+                          {model.capabilities?.vision && (
+                            <Badge variant="outline" className="text-xs px-1 py-0">
+                              Vision
+                            </Badge>
+                          )}
+                        </CommandItem>
+                      </HoverCardTrigger>
+                      <HoverCardContent side="right" align="start" className="w-80">
+                        <div className="space-y-3">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
                               <span className={providerColors[provider]}>
                                 {providerIcons[provider]}
                               </span>
-                              <span className="text-sm">{model.display_name}</span>
-                              {badge && (
-                                <Badge variant="secondary" className={cn('text-xs px-1.5 py-0', badge.color)}>
-                                  {badge.text}
-                                </Badge>
-                              )}
+                              <h4 className="text-sm font-semibold">
+                                {provider.charAt(0).toUpperCase() + provider.slice(1)} / {model.display_name}
+                              </h4>
                             </div>
-                            {model.capabilities?.vision && (
-                              <Badge variant="outline" className="text-xs px-1 py-0">
-                                Vision
-                              </Badge>
-                            )}
-                          </CommandItem>
-                        </HoverCardTrigger>
-                        <HoverCardContent side="right" align="start" className="w-80">
-                          <div className="space-y-3">
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className={providerColors[provider]}>
-                                  {providerIcons[provider]}
-                                </span>
-                                <h4 className="text-sm font-semibold">
-                                  {provider.charAt(0).toUpperCase() + provider.slice(1)} / {model.display_name}
-                                </h4>
-                              </div>
-                              {model.cost && (
-                                <div className="text-xs text-muted-foreground">
-                                  Credits cost: {formatCost(model.cost.input)}/1K input • {formatCost(model.cost.output)}/1K output
-                                </div>
-                              )}
-                            </div>
-
-                            {model.description && (
-                              <p className="text-sm text-muted-foreground">
-                                {model.description}
-                              </p>
-                            )}
-
-                            <div className="grid grid-cols-2 gap-2 text-xs">
-                              {model.context_window && (
-                                <div>
-                                  <span className="text-muted-foreground">Context: </span>
-                                  <span className="font-medium">{formatTokens(model.context_window)}</span>
-                                </div>
-                              )}
-                              {model.max_tokens && (
-                                <div>
-                                  <span className="text-muted-foreground">Max output: </span>
-                                  <span className="font-medium">{formatTokens(model.max_tokens)}</span>
-                                </div>
-                              )}
-                            </div>
-
-                            {model.capabilities && (
-                              <div className="flex flex-wrap gap-1">
-                                {model.capabilities.vision && (
-                                  <Badge variant="secondary" className="text-xs">Vision</Badge>
-                                )}
-                                {model.capabilities.functions && (
-                                  <Badge variant="secondary" className="text-xs">Functions</Badge>
-                                )}
-                                {model.capabilities.streaming && (
-                                  <Badge variant="secondary" className="text-xs">Streaming</Badge>
-                                )}
-                                {model.capabilities.reasoning && (
-                                  <Badge variant="secondary" className="text-xs">Reasoning</Badge>
-                                )}
+                            {model.cost && (
+                              <div className="text-xs text-muted-foreground">
+                                Credits cost: {formatCost(model.cost.input)}/1K input • {formatCost(model.cost.output)}/1K output
                               </div>
                             )}
                           </div>
-                        </HoverCardContent>
-                      </HoverCard>
-                    )
-                  })}
-                </CommandGroup>
-              ))
-            )}
+
+                          {model.description && (
+                            <p className="text-sm text-muted-foreground">
+                              {model.description}
+                            </p>
+                          )}
+
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            {model.context_window && (
+                              <div>
+                                <span className="text-muted-foreground">Context: </span>
+                                <span className="font-medium">{formatTokens(model.context_window)}</span>
+                              </div>
+                            )}
+                            {model.max_tokens && (
+                              <div>
+                                <span className="text-muted-foreground">Max output: </span>
+                                <span className="font-medium">{formatTokens(model.max_tokens)}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {model.capabilities && (
+                            <div className="flex flex-wrap gap-1">
+                              {model.capabilities.vision && (
+                                <Badge variant="secondary" className="text-xs">Vision</Badge>
+                              )}
+                              {model.capabilities.functions && (
+                                <Badge variant="secondary" className="text-xs">Functions</Badge>
+                              )}
+                              {model.capabilities.streaming && (
+                                <Badge variant="secondary" className="text-xs">Streaming</Badge>
+                              )}
+                              {model.capabilities.reasoning && (
+                                <Badge variant="secondary" className="text-xs">Reasoning</Badge>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </HoverCardContent>
+                    </HoverCard>
+                  )
+                })}
+              </CommandGroup>
+            ))}
           </CommandList>
         </Command>
       </PopoverContent>
