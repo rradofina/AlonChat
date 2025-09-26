@@ -15,17 +15,30 @@ export interface CrawlProgress {
   total: number
   currentUrl: string
   phase: 'discovering' | 'processing'
+  discoveredLinks?: string[]
+}
+
+export interface CrawlOptions {
+  maxPages?: number
+  crawlSubpages?: boolean
+  fullPageContent?: boolean
+  onProgress?: (progress: CrawlProgress) => void | Promise<void>
 }
 
 export class WebsiteScraper {
   private maxPages: number
   private crawlSubpages: boolean
+  private fullPageContent: boolean
   private crawledUrls: Set<string> = new Set()
   private domain: string = ''
+  private discoveredLinks: Set<string> = new Set()
+  private onProgress?: (progress: CrawlProgress) => void | Promise<void>
 
-  constructor(maxPages: number = 10, crawlSubpages: boolean = true) {
-    this.maxPages = maxPages
-    this.crawlSubpages = crawlSubpages
+  constructor(options: CrawlOptions = {}) {
+    this.maxPages = options.maxPages || 10
+    this.crawlSubpages = options.crawlSubpages !== false
+    this.fullPageContent = options.fullPageContent || false
+    this.onProgress = options.onProgress
   }
 
   async crawlWebsite(startUrl: string): Promise<CrawlResult[]> {
@@ -47,6 +60,17 @@ export class WebsiteScraper {
       }]
     }
 
+    // Report initial discovery phase
+    if (this.onProgress) {
+      await this.onProgress({
+        current: 0,
+        total: this.maxPages,
+        currentUrl: startUrl,
+        phase: 'discovering',
+        discoveredLinks: []
+      })
+    }
+
     while (urlQueue.length > 0 && results.length < this.maxPages) {
       const currentUrl = urlQueue.shift()!
 
@@ -61,8 +85,22 @@ export class WebsiteScraper {
         await this.delay(1000)
       }
 
+      // Report progress before crawling
+      if (this.onProgress) {
+        await this.onProgress({
+          current: results.length + 1,
+          total: this.maxPages,
+          currentUrl,
+          phase: 'processing',
+          discoveredLinks: Array.from(this.discoveredLinks)
+        })
+      }
+
       const result = await this.crawlPage(currentUrl)
       results.push(result)
+
+      // Add discovered links to our set
+      result.links.forEach(link => this.discoveredLinks.add(link))
 
       // Add subpages to queue if enabled
       if (this.crawlSubpages && !result.error) {
@@ -119,34 +157,43 @@ export class WebsiteScraper {
                    $('h1').first().text().trim() ||
                    'Untitled Page'
 
-      // Extract main content
-      const contentSelectors = [
-        'main',
-        'article',
-        '[role="main"]',
-        '.content',
-        '#content',
-        '.main-content',
-        '#main-content',
-        'body'
-      ]
-
+      // Extract content based on mode
       let content = ''
-      for (const selector of contentSelectors) {
-        const element = $(selector).first()
-        if (element.length) {
-          content = element.text()
-            .replace(/\s+/g, ' ')
-            .trim()
-          if (content.length > 100) break
-        }
-      }
 
-      // If no good content found, get all text
-      if (content.length < 100) {
+      if (this.fullPageContent) {
+        // Full page mode - get everything including headers/footers
         content = $('body').text()
           .replace(/\s+/g, ' ')
           .trim()
+      } else {
+        // Smart extraction mode - focus on main content
+        const contentSelectors = [
+          'main',
+          'article',
+          '[role="main"]',
+          '.content',
+          '#content',
+          '.main-content',
+          '#main-content',
+          'body'
+        ]
+
+        for (const selector of contentSelectors) {
+          const element = $(selector).first()
+          if (element.length) {
+            content = element.text()
+              .replace(/\s+/g, ' ')
+              .trim()
+            if (content.length > 100) break
+          }
+        }
+
+        // If no good content found, get all text
+        if (content.length < 100) {
+          content = $('body').text()
+            .replace(/\s+/g, ' ')
+            .trim()
+        }
       }
 
       // Extract links
@@ -270,12 +317,13 @@ export async function scrapeWebsite(
   url: string,
   maxPages: number = 10,
   crawlSubpages: boolean = true,
-  onProgress?: (progress: CrawlProgress) => void
+  onProgress?: (progress: CrawlProgress) => void | Promise<void>,
+  fullPageContent: boolean = false
 ): Promise<CrawlResult[]> {
   try {
     // Try Playwright first for better success rate
     console.log('Attempting to crawl with Playwright...')
-    const results = await scrapeWebsiteWithPlaywright(url, maxPages, crawlSubpages, onProgress as any)
+    const results = await scrapeWebsiteWithPlaywright(url, maxPages, crawlSubpages, onProgress as any, fullPageContent)
 
     // If Playwright got results, return them
     const validResults = results.filter(r => !r.error || r.content)
@@ -290,7 +338,12 @@ export async function scrapeWebsite(
     console.log('Playwright error, falling back to fetch:', error.message)
   }
 
-  // Fall back to fetch-based scraper (no progress support in fallback)
-  const scraper = new WebsiteScraper(maxPages, crawlSubpages)
+  // Fall back to fetch-based scraper
+  const scraper = new WebsiteScraper({
+    maxPages,
+    crawlSubpages,
+    fullPageContent,
+    onProgress
+  })
   return scraper.crawlWebsite(url)
 }

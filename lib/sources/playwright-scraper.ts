@@ -15,20 +15,24 @@ export interface CrawlProgress {
   total: number
   currentUrl: string
   phase: 'discovering' | 'processing'
+  discoveredLinks?: string[]
 }
 
 export class PlaywrightScraper {
   private maxPages: number
   private crawlSubpages: boolean
+  private fullPageContent: boolean
   private crawledUrls: Set<string> = new Set()
   private domain: string = ''
   private browser: Browser | null = null
-  private onProgress?: (progress: CrawlProgress) => void
+  private onProgress?: (progress: CrawlProgress) => void | Promise<void>
+  private discoveredLinks: Set<string> = new Set()
 
-  constructor(maxPages: number = 10, crawlSubpages: boolean = true, onProgress?: (progress: CrawlProgress) => void) {
+  constructor(maxPages: number = 10, crawlSubpages: boolean = true, onProgress?: (progress: CrawlProgress) => void | Promise<void>, fullPageContent: boolean = false) {
     this.maxPages = maxPages
     this.crawlSubpages = crawlSubpages
     this.onProgress = onProgress
+    this.fullPageContent = fullPageContent
   }
 
   setProgressCallback(callback: (progress: CrawlProgress) => void) {
@@ -64,11 +68,12 @@ export class PlaywrightScraper {
 
       // Report initial progress
       if (this.onProgress) {
-        this.onProgress({
+        await this.onProgress({
           current: 0,
           total: this.maxPages,
           currentUrl: startUrl,
-          phase: 'discovering'
+          phase: 'discovering',
+          discoveredLinks: []
         })
       }
 
@@ -89,16 +94,20 @@ export class PlaywrightScraper {
 
         // Report progress
         if (this.onProgress) {
-          this.onProgress({
+          await this.onProgress({
             current: results.length + 1,
             total: this.maxPages,
             currentUrl,
-            phase: 'processing'
+            phase: 'processing',
+            discoveredLinks: Array.from(this.discoveredLinks)
           })
         }
 
         const result = await this.crawlPage(currentUrl)
         results.push(result)
+
+        // Track discovered links
+        result.links.forEach(link => this.discoveredLinks.add(link))
 
         // Add subpages to queue if enabled
         if (this.crawlSubpages && !result.error) {
@@ -189,34 +198,43 @@ export class PlaywrightScraper {
                    $('h1').first().text().trim() ||
                    'Untitled Page'
 
-      // Extract main content
-      const contentSelectors = [
-        'main',
-        'article',
-        '[role="main"]',
-        '.content',
-        '#content',
-        '.main-content',
-        '#main-content',
-        'body'
-      ]
-
+      // Extract content based on mode
       let content = ''
-      for (const selector of contentSelectors) {
-        const element = $(selector).first()
-        if (element.length) {
-          content = element.text()
-            .replace(/\s+/g, ' ')
-            .trim()
-          if (content.length > 100) break
-        }
-      }
 
-      // If no good content found, get all text
-      if (content.length < 100) {
+      if (this.fullPageContent) {
+        // Full page mode - get everything including headers/footers
         content = $('body').text()
           .replace(/\s+/g, ' ')
           .trim()
+      } else {
+        // Smart extraction mode - focus on main content
+        const contentSelectors = [
+          'main',
+          'article',
+          '[role="main"]',
+          '.content',
+          '#content',
+          '.main-content',
+          '#main-content',
+          'body'
+        ]
+
+        for (const selector of contentSelectors) {
+          const element = $(selector).first()
+          if (element.length) {
+            content = element.text()
+              .replace(/\s+/g, ' ')
+              .trim()
+            if (content.length > 100) break
+          }
+        }
+
+        // If no good content found, get all text
+        if (content.length < 100) {
+          content = $('body').text()
+            .replace(/\s+/g, ' ')
+            .trim()
+        }
       }
 
       // Extract links
@@ -310,8 +328,9 @@ export async function scrapeWebsiteWithPlaywright(
   url: string,
   maxPages: number = 10,
   crawlSubpages: boolean = true,
-  onProgress?: (progress: CrawlProgress) => void
+  onProgress?: (progress: CrawlProgress) => void | Promise<void>,
+  fullPageContent: boolean = false
 ): Promise<CrawlResult[]> {
-  const scraper = new PlaywrightScraper(maxPages, crawlSubpages, onProgress)
+  const scraper = new PlaywrightScraper(maxPages, crawlSubpages, onProgress, fullPageContent)
   return scraper.crawlWebsite(url)
 }

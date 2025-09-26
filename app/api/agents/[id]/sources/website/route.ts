@@ -4,8 +4,11 @@ import { queueWebsiteCrawl, getJobStatus } from '@/lib/queue/website-processor'
 import { scrapeWebsite, CrawlProgress } from '@/lib/sources/website-scraper'
 import { ChunkManager } from '@/lib/services/chunk-manager'
 
-// Store progress in memory (in production, use Redis or similar)
-const crawlProgress = new Map<string, CrawlProgress>()
+export interface ExtendedCrawlProgress extends CrawlProgress {
+  discoveredLinks: string[]
+  startTime?: number
+  averageTimePerPage?: number
+}
 
 export async function POST(
   request: NextRequest,
@@ -14,7 +17,7 @@ export async function POST(
   const params = await props.params
   try {
     const supabase = await createClient()
-    const { url, crawlSubpages, maxPages } = await request.json()
+    const { url, crawlSubpages, maxPages, fullPageContent } = await request.json()
 
     if (!url) {
       return NextResponse.json(
@@ -53,7 +56,10 @@ export async function POST(
           max_pages: maxPages || 10,
           pages_crawled: 0,
           crawled_pages: [],
-          crawl_errors: []
+          discovered_links: [],
+          crawl_errors: [],
+          crawl_progress: null,
+          full_page_content: fullPageContent || false
         }
       })
       .select()
@@ -88,7 +94,7 @@ export async function POST(
         .eq('id', source.id)
 
       // Process in background (fire and forget)
-      processWebsiteDirectly(source.id, params.id, agent.project_id, url, crawlSubpages || false, maxPages || 10)
+      processWebsiteDirectly(source.id, params.id, agent.project_id, url, crawlSubpages || false, maxPages || 10, fullPageContent || false)
     }
 
     // Format for frontend
@@ -143,10 +149,10 @@ export async function GET(
       return NextResponse.json({ sources: [] })
     }
 
-    // Format for frontend with progress information
+    // Format for frontend with progress information from database
     const formattedSources = sources.map(source => {
-      // Check if this source has active crawl progress
-      const progress = crawlProgress.get(source.id)
+      // Get progress from metadata instead of memory
+      const progress = source.metadata?.crawl_progress || null
 
       return {
         id: source.id,
@@ -162,7 +168,8 @@ export async function GET(
         is_trained: source.is_trained || false,
         created_at: source.created_at,
         metadata: source.metadata,
-        progress: progress || null // Include progress if available
+        progress: progress,
+        discovered_links: source.metadata?.discovered_links || []
       }
     })
 
@@ -184,7 +191,8 @@ async function processWebsiteDirectly(
   projectId: string,
   url: string,
   crawlSubpages: boolean,
-  maxPages: number
+  maxPages: number,
+  fullPageContent: boolean = false
 ) {
   const supabase = await createClient()
 
@@ -200,21 +208,67 @@ async function processWebsiteDirectly(
     console.log(`Starting direct crawl for ${normalizedUrl}`)
     console.log(`Settings: maxPages=${maxPages}, crawlSubpages=${crawlSubpages}`)
 
-    // Progress callback to store in memory
-    const progressCallback = (progress: CrawlProgress) => {
-      crawlProgress.set(sourceId, progress)
+    const startTime = Date.now()
+    let pagesProcessed = 0
+    const discoveredLinks = new Set<string>()
+
+    // Progress callback to store in database
+    const progressCallback = async (progress: ExtendedCrawlProgress) => {
+      pagesProcessed++
+      const elapsedTime = Date.now() - startTime
+      const averageTimePerPage = elapsedTime / pagesProcessed
+
+      // Add discovered links from progress
+      if (progress.discoveredLinks) {
+        progress.discoveredLinks.forEach(link => discoveredLinks.add(link))
+      }
+
+      // Update progress in database
+      const progressData = {
+        ...progress,
+        discoveredLinks: Array.from(discoveredLinks),
+        startTime,
+        averageTimePerPage
+      }
+
+      await supabase
+        .from('sources')
+        .update({
+          metadata: {
+            url: normalizedUrl,
+            crawl_subpages: crawlSubpages,
+            max_pages: maxPages,
+            pages_crawled: progress.phase === 'processing' ? progress.current : 0,
+            crawled_pages: [],
+            discovered_links: Array.from(discoveredLinks),
+            crawl_errors: [],
+            crawl_progress: progressData,
+            full_page_content: false
+          }
+        })
+        .eq('id', sourceId)
+
       console.log(`Progress [${sourceId}]: ${progress.phase} - ${progress.current}/${progress.total} - ${progress.currentUrl}`)
+      console.log(`Discovered ${discoveredLinks.size} links so far`)
     }
 
     // Crawl website with progress tracking
-    const crawlResults = await scrapeWebsite(normalizedUrl, maxPages, crawlSubpages, progressCallback)
+    const crawlResults = await scrapeWebsite(normalizedUrl, maxPages, crawlSubpages, progressCallback as any, fullPageContent)
     console.log(`Crawl results: ${crawlResults.length} pages`)
     crawlResults.forEach(r => {
       console.log(`- ${r.url}: ${r.error ? `ERROR: ${r.error}` : `${r.content?.length || 0} chars`}`)
     })
 
-    // Clean up progress after completion
-    crawlProgress.delete(sourceId)
+    // Clear progress from database after completion
+    await supabase
+      .from('sources')
+      .update({
+        metadata: {
+          ...((await supabase.from('sources').select('metadata').eq('id', sourceId).single()).data?.metadata || {}),
+          crawl_progress: null
+        }
+      })
+      .eq('id', sourceId)
 
     // Update pages crawled count with crawled pages list
     const crawledPages = crawlResults.filter(r => !r.error).map(r => r.url)
@@ -246,8 +300,11 @@ async function processWebsiteDirectly(
             max_pages: maxPages,
             pages_crawled: attemptedUrls.length,
             crawled_pages: attemptedUrls, // Store main URL for individual mode
+            discovered_links: [],
             crawl_errors: crawlErrors,
+            crawl_progress: null,
             total_chunks: 0,
+            full_page_content: false,
             crawl_completed_at: new Date().toISOString()
           },
           updated_at: new Date().toISOString()
@@ -305,8 +362,11 @@ async function processWebsiteDirectly(
           max_pages: maxPages,
           pages_crawled: validPages.length,
           crawled_pages: validPages.map(p => p.url),
+          discovered_links: Array.from(discoveredLinks),
           crawl_errors: crawlErrors,
+          crawl_progress: null,
           total_chunks: totalChunks,
+          full_page_content: false,
           crawl_completed_at: new Date().toISOString()
         },
         updated_at: new Date().toISOString()
@@ -331,8 +391,11 @@ async function processWebsiteDirectly(
           max_pages: maxPages,
           pages_crawled: 0,
           crawled_pages: [],
+          discovered_links: [],
           crawl_errors: [{ url: normalizedUrl, error: error.message || 'Failed to crawl' }],
+          crawl_progress: null,
           error_message: error.message || 'Failed to crawl website',
+          full_page_content: false,
           crawl_completed_at: new Date().toISOString()
         },
         updated_at: new Date().toISOString()
@@ -441,7 +504,9 @@ export async function PATCH(
               ...source.metadata,
               pages_crawled: 0,
               crawled_pages: [],
+              discovered_links: [],
               crawl_errors: [],
+              crawl_progress: null,
               total_chunks: 0,
               crawl_completed_at: null
             },
@@ -474,7 +539,8 @@ export async function PATCH(
             agent?.project_id || '',
             source.website_url,
             source.metadata?.crawl_subpages || false,
-            source.metadata?.max_pages || 10
+            source.metadata?.max_pages || 10,
+            source.metadata?.full_page_content || false
           )
         }
 

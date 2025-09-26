@@ -21,6 +21,16 @@ interface SubLink {
   crawled: boolean
 }
 
+interface CrawlProgress {
+  current: number
+  total: number
+  currentUrl: string
+  phase: 'discovering' | 'processing'
+  discoveredLinks?: string[]
+  startTime?: number
+  averageTimePerPage?: number
+}
+
 interface WebsiteSource {
   id: string
   name: string
@@ -31,6 +41,8 @@ interface WebsiteSource {
   created_at: string
   sub_links?: SubLink[]
   metadata?: any
+  progress?: CrawlProgress | null
+  discovered_links?: string[]
 }
 
 export default function WebsitePage() {
@@ -52,6 +64,7 @@ export default function WebsitePage() {
   const [includeOnlyPaths, setIncludeOnlyPaths] = useState('')
   const [excludePaths, setExcludePaths] = useState('')
   const [slowScraping, setSlowScraping] = useState(false)
+  const [fullPageContent, setFullPageContent] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('Default')
   const [selectedWebsite, setSelectedWebsite] = useState<WebsiteSource | null>(null)
@@ -156,7 +169,8 @@ export default function WebsitePage() {
         body: JSON.stringify({
           url,
           crawlSubpages: crawlOption === 'crawl', // Always crawl subpages when in crawl mode
-          maxPages: crawlOption === 'crawl' ? maxPages : 1
+          maxPages: crawlOption === 'crawl' ? maxPages : 1,
+          fullPageContent
         }),
       })
 
@@ -565,6 +579,26 @@ export default function WebsitePage() {
                               </div>
                             </label>
                           </div>
+
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              id="full-page-content"
+                              checked={fullPageContent}
+                              onChange={(e) => setFullPageContent(e.target.checked)}
+                              className="rounded border-gray-300"
+                            />
+                            <label htmlFor="full-page-content" className="text-sm text-gray-600 flex items-center gap-1">
+                              Include full page content
+                              <div className="relative group">
+                                <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" />
+                                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50">
+                                  <div className="absolute bottom-[-4px] left-1/2 transform -translate-x-1/2 w-2 h-2 bg-gray-900 rotate-45"></div>
+                                  Include headers, footers, and navigation content. By default, only main content is extracted.
+                                </div>
+                              </div>
+                            </label>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -643,12 +677,16 @@ export default function WebsitePage() {
                   const isExpanded = expandedSources.has(source.id)
                   const isEditing = editingSource === source.id
 
-                  // Get crawled pages from metadata
+                  // Get crawled or discovered pages from metadata
                   const crawledPages = source.metadata?.crawled_pages || []
-                  const subLinks = crawledPages.map((url: string) => ({
+                  const discoveredLinks = source.discovered_links || source.metadata?.discovered_links || []
+
+                  // Combine crawled and discovered links
+                  const allLinks = new Set([...crawledPages, ...discoveredLinks])
+                  const subLinks = Array.from(allLinks).map((url: string) => ({
                     url,
                     status: 'included' as const,
-                    crawled: true
+                    crawled: crawledPages.includes(url)
                   }))
 
                   // Only show chevron for crawl_subpages mode
@@ -714,19 +752,26 @@ export default function WebsitePage() {
                                 </p>
                                 <div className="flex items-center gap-2 mt-1">
                                   {(source.status === 'pending' || source.status === 'processing') && (
-                                    <span className="text-xs text-gray-600 flex items-center gap-1">
-                                      <Loader2 className="h-3 w-3 animate-spin" />
-                                      {source.progress ? (
-                                        <>
-                                          {source.progress.phase === 'discovering'
-                                            ? 'Discovering links...'
-                                            : `Processing page ${source.progress.current} of ${source.progress.total}...`
-                                          }
-                                        </>
-                                      ) : (
-                                        'Crawling in-progress'
+                                    <>
+                                      <span className="text-xs text-gray-600 flex items-center gap-1">
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                        {source.progress ? (
+                                          <>
+                                            {source.progress.phase === 'discovering'
+                                              ? `Discovering links... (found ${source.progress.discoveredLinks?.length || 0})`
+                                              : `Processing page ${source.progress.current} of ${source.progress.total}`
+                                            }
+                                          </>
+                                        ) : (
+                                          'Crawling in-progress'
+                                        )}
+                                      </span>
+                                      {source.progress && source.progress.averageTimePerPage && (
+                                        <span className="text-xs text-gray-400">
+                                          (~{Math.ceil(((source.progress.total - source.progress.current) * source.progress.averageTimePerPage) / 1000)}s remaining)
+                                        </span>
                                       )}
-                                    </span>
+                                    </>
                                   )}
                                   {source.progress && source.progress.currentUrl && (
                                     <span className="text-xs text-gray-400 truncate max-w-[200px]" title={source.progress.currentUrl}>
@@ -832,7 +877,12 @@ export default function WebsitePage() {
                             {subLinks && subLinks.length > 0 ? (
                               <>
                                 <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
-                                  {subLinks.length === 1 ? '1 LINK' : `${subLinks.length} LINKS INCLUDED`}
+                                  {subLinks.length === 1 ? '1 LINK' : `${subLinks.length} LINKS`}
+                                  {source.status === 'processing' && source.progress && (
+                                    <span className="text-gray-400">
+                                      ({subLinks.filter(l => l.crawled).length} crawled, {subLinks.filter(l => !l.crawled).length} pending)
+                                    </span>
+                                  )}
                                 </p>
                                 {subLinks.map((link: SubLink, index: number) => {
                                   const linkId = `${source.id}-${index}`
@@ -842,10 +892,16 @@ export default function WebsitePage() {
                                         <span className="text-sm text-gray-700 truncate">
                                           {link.url}
                                         </span>
-                                        {/* Show New badge for recently crawled links */}
-                                        <span className="px-1.5 py-0.5 text-xs bg-green-100 text-green-800 rounded">
-                                          New
-                                        </span>
+                                        {/* Show status badge */}
+                                        {link.crawled ? (
+                                          <span className="px-1.5 py-0.5 text-xs bg-green-100 text-green-800 rounded">
+                                            Crawled
+                                          </span>
+                                        ) : (
+                                          <span className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">
+                                            Discovered
+                                          </span>
+                                        )}
                                       </div>
 
                                       <div className="flex items-center gap-1">
