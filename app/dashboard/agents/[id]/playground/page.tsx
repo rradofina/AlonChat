@@ -283,7 +283,7 @@ export default function PlaygroundPage() {
                 output: model.request_template?.pricing.output_per_million ? model.request_template.pricing.output_per_million / 1000 : 0,
               } : undefined
             }))}
-            value={selectedModel}
+            value={availableModels.find(m => m.name === selectedModel || m.model_id === selectedModel)?.name || selectedModel}
             onValueChange={(value) => setSelectedModel(value)}
             placeholder={loadingConfig ? "Loading models..." : "Select a model..."}
             disabled={loadingConfig}

@@ -66,7 +66,7 @@ export default function WebsitePage() {
   const [sources, setSources] = useState<WebsiteSource[]>([])
   const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(false)
-  const [maxPages, setMaxPages] = useState(100)
+  const [maxPages, setMaxPages] = useState(200)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set())
   const [editingSource, setEditingSource] = useState<string | null>(null)
@@ -654,7 +654,7 @@ export default function WebsitePage() {
                             <Input
                               type="number"
                               value={maxPages}
-                              onChange={(e) => setMaxPages(parseInt(e.target.value) || 100)}
+                              onChange={(e) => setMaxPages(parseInt(e.target.value) || 200)}
                               min="1"
                               max="1000"
                               className="w-32"
@@ -1000,14 +1000,25 @@ export default function WebsitePage() {
                           <div className="mt-3 ml-12 pb-2 mr-2 overflow-hidden">
                             {subLinks && subLinks.length > 0 ? (
                               <>
-                                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
-                                  {subLinks.length === 1 ? '1 LINK' : `${subLinks.length} LINKS`}
-                                  {source.status === 'processing' && source.progress && (
-                                    <span className="text-gray-400">
-                                      ({subLinks.filter(l => l.crawled).length} crawled, {subLinks.filter(l => !l.crawled).length} pending)
-                                    </span>
+                                <div className="flex items-center gap-2 mb-2">
+                                  <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                    {subLinks.length === 1 ? '1 LINK' : `${subLinks.length} LINKS`}
+                                    {source.status === 'processing' && source.progress && (
+                                      <span className="text-gray-400">
+                                        ({subLinks.filter(l => l.crawled).length} crawled, {subLinks.filter(l => !l.crawled).length} pending)
+                                      </span>
+                                    )}
+                                  </p>
+                                  {subLinks.filter(l => !l.crawled).length > 0 && source.status === 'ready' && (
+                                    <div className="relative group">
+                                      <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" />
+                                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 max-w-xs">
+                                        <div className="absolute bottom-[-4px] left-1/2 transform -translate-x-1/2 w-2 h-2 bg-gray-900 rotate-45"></div>
+                                        'Discovered' links were found but not crawled due to the max pages limit ({source.max_pages || source.metadata?.max_pages || 200} pages)
+                                      </div>
+                                    </div>
                                   )}
-                                </p>
+                                </div>
                                 <div className="max-h-64 overflow-y-auto overflow-x-hidden border border-gray-200 rounded-md bg-gray-50 p-2">
                                   <div className="space-y-1">
                                     {subLinks.map((link: SubLink, index: number) => {
