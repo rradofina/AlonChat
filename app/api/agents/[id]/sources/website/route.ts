@@ -188,8 +188,16 @@ async function processWebsiteDirectly(
 ) {
   const supabase = await createClient()
 
+  // Normalize URL by adding https:// if no protocol is specified
+  let normalizedUrl = url
+  if (!url.match(/^https?:\/\//i)) {
+    normalizedUrl = 'https://' + url
+    console.log(`Normalized URL from ${url} to ${normalizedUrl}`)
+  }
+
   try {
-    console.log(`Starting direct crawl for ${url}`)
+
+    console.log(`Starting direct crawl for ${normalizedUrl}`)
     console.log(`Settings: maxPages=${maxPages}, crawlSubpages=${crawlSubpages}`)
 
     // Progress callback to store in memory
@@ -199,7 +207,7 @@ async function processWebsiteDirectly(
     }
 
     // Crawl website with progress tracking
-    const crawlResults = await scrapeWebsite(url, maxPages, crawlSubpages, progressCallback)
+    const crawlResults = await scrapeWebsite(normalizedUrl, maxPages, crawlSubpages, progressCallback)
     console.log(`Crawl results: ${crawlResults.length} pages`)
     crawlResults.forEach(r => {
       console.log(`- ${r.url}: ${r.error ? `ERROR: ${r.error}` : `${r.content?.length || 0} chars`}`)
@@ -224,7 +232,7 @@ async function processWebsiteDirectly(
 
       // For individual link mode, still show the main URL as "crawled"
       // This allows users to see and click through to the website details
-      const attemptedUrls = crawlSubpages ? [] : [url]
+      const attemptedUrls = crawlSubpages ? [] : [normalizedUrl]
 
       await supabase
         .from('sources')
@@ -233,7 +241,7 @@ async function processWebsiteDirectly(
           size_kb: 0,
           chunk_count: 0,
           metadata: {
-            url,
+            url: normalizedUrl,
             crawl_subpages: crawlSubpages,
             max_pages: maxPages,
             pages_crawled: attemptedUrls.length,
@@ -266,13 +274,14 @@ async function processWebsiteDirectly(
           type: 'website',
           page_url: page.url,
           page_title: page.title || page.url,
-          root_url: url,
+          root_url: normalizedUrl,
           crawl_timestamp: new Date().toISOString(),
           // Add link depth if available
           depth: page.url === url ? 0 : page.url.split('/').length - url.split('/').length
         },
         chunkSize: 4000, // Larger chunks for websites
-        chunkOverlap: 400 // Maintain overlap for context
+        chunkOverlap: 400, // Maintain overlap for context
+        supabaseClient: supabase
       })
 
       totalChunks += chunkCount
@@ -291,7 +300,7 @@ async function processWebsiteDirectly(
         size_kb: sizeKb,
         chunk_count: totalChunks,
         metadata: {
-          url,
+          url: normalizedUrl,
           crawl_subpages: crawlSubpages,
           max_pages: maxPages,
           pages_crawled: validPages.length,
@@ -317,12 +326,12 @@ async function processWebsiteDirectly(
         size_kb: 0,
         chunk_count: 0,
         metadata: {
-          url,
+          url: normalizedUrl,
           crawl_subpages: crawlSubpages,
           max_pages: maxPages,
           pages_crawled: 0,
           crawled_pages: [],
-          crawl_errors: [{ url, error: error.message || 'Failed to crawl' }],
+          crawl_errors: [{ url: normalizedUrl, error: error.message || 'Failed to crawl' }],
           error_message: error.message || 'Failed to crawl website',
           crawl_completed_at: new Date().toISOString()
         },

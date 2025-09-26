@@ -651,8 +651,8 @@ export default function WebsitePage() {
                     crawled: true
                   }))
 
-                  // Always show chevron for website sources
-                  const hasSubLinks = true
+                  // Only show chevron for crawl_subpages mode
+                  const hasSubLinks = source.metadata?.crawl_subpages === true
 
                   return (
                     <div key={source.id}>
@@ -676,10 +676,10 @@ export default function WebsitePage() {
 
                           <div
                             className="flex-1"
-                            style={{ cursor: !isEditing ? 'pointer' : 'default' }}
+                            style={{ cursor: !isEditing && !hasSubLinks ? 'pointer' : 'default' }}
                             onClick={() => {
-                              if (!isEditing && source.status === 'ready') {
-                                // Navigate to website details
+                              if (!isEditing && !hasSubLinks && source.status === 'ready') {
+                                // For individual links, go straight to website details
                                 setSelectedWebsite(source)
                                 setSelectedSubLink(null) // View main URL
                               }

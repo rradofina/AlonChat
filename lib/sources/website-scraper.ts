@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio'
-import { scrapeWebsiteWithPlaywright, CrawlProgress } from './playwright-scraper'
+import { scrapeWebsiteWithPlaywright } from './playwright-scraper'
 
 export interface CrawlResult {
   url: string
@@ -10,7 +10,12 @@ export interface CrawlResult {
   error?: string
 }
 
-export { CrawlProgress }
+export interface CrawlProgress {
+  current: number
+  total: number
+  currentUrl: string
+  phase: 'discovering' | 'processing'
+}
 
 export class WebsiteScraper {
   private maxPages: number
@@ -270,7 +275,7 @@ export async function scrapeWebsite(
   try {
     // Try Playwright first for better success rate
     console.log('Attempting to crawl with Playwright...')
-    const results = await scrapeWebsiteWithPlaywright(url, maxPages, crawlSubpages, onProgress)
+    const results = await scrapeWebsiteWithPlaywright(url, maxPages, crawlSubpages, onProgress as any)
 
     // If Playwright got results, return them
     const validResults = results.filter(r => !r.error || r.content)
