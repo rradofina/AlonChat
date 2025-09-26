@@ -1,3 +1,8 @@
+/**
+ * @deprecated This file uses hardcoded models - DO NOT USE
+ * Use lib/ai/providers/model-discovery.ts instead for dynamic model discovery
+ */
+
 import { createClient } from '@/lib/supabase/server'
 
 interface ModelDefinition {

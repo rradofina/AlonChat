@@ -439,10 +439,10 @@ export default function WebsitePage() {
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full overflow-hidden">
       {/* Main Content Area */}
-      <div className="flex-1 px-8 pt-8 pb-4 bg-white min-h-full">
-        <div className="w-full">
+      <div className="flex-1 px-8 pt-8 pb-4 bg-white min-h-full overflow-x-hidden">
+        <div className="w-full max-w-full">
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">Website</h1>
           <p className="text-sm text-gray-600 mb-6">
             Crawl web pages or submit sitemaps to update your AI with the latest content.
@@ -677,7 +677,7 @@ export default function WebsitePage() {
 
           {/* Link Sources List - Only show entire section when we have data */}
           {filteredSources.length > 0 && (
-            <div>
+            <div className="overflow-hidden">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Link sources</h2>
 
               {/* Controls */}
@@ -730,7 +730,7 @@ export default function WebsitePage() {
               </div>
 
               {/* Sources List */}
-              <div>
+              <div className="overflow-hidden">
                 {currentSources.map((source, index) => {
                   const isExpanded = expandedSources.has(source.id)
                   const isEditing = editingSource === source.id
@@ -751,7 +751,7 @@ export default function WebsitePage() {
                   const hasSubLinks = source.metadata?.crawl_subpages === true
 
                   return (
-                    <div key={source.id}>
+                    <div key={source.id} className="overflow-hidden">
                       <div className="py-3 hover:bg-gray-50 transition-colors">
                         <div className="flex items-start gap-3">
                           <Checkbox
@@ -771,7 +771,7 @@ export default function WebsitePage() {
                           <Globe className="h-5 w-5 text-gray-400 mt-0.5" />
 
                           <div
-                            className="flex-1"
+                            className="flex-1 min-w-0 overflow-hidden"
                             style={{ cursor: !isEditing && !hasSubLinks ? 'pointer' : 'default' }}
                             onClick={() => {
                               if (!isEditing && !hasSubLinks && source.status === 'ready') {
@@ -931,7 +931,7 @@ export default function WebsitePage() {
 
                         {/* Expanded Sub-links */}
                         {isExpanded && (
-                          <div className="mt-3 ml-12 pb-2">
+                          <div className="mt-3 ml-12 pb-2 mr-2 overflow-hidden">
                             {subLinks && subLinks.length > 0 ? (
                               <>
                                 <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
@@ -949,16 +949,16 @@ export default function WebsitePage() {
                                   return (
                                     <div key={index} className="flex items-center justify-between py-1 hover:bg-white rounded px-2 group">
                                       <div className="flex-1 flex items-center gap-2 min-w-0 overflow-hidden">
-                                        <span className="text-sm text-gray-700 truncate block max-w-full" title={link.url}>
+                                        <span className="text-sm text-gray-700 truncate flex-1" title={link.url}>
                                           {link.url}
                                         </span>
                                         {/* Show status badge */}
                                         {link.crawled ? (
-                                          <span className="px-1.5 py-0.5 text-xs bg-green-100 text-green-800 rounded">
+                                          <span className="px-1.5 py-0.5 text-xs bg-green-100 text-green-800 rounded flex-shrink-0 whitespace-nowrap">
                                             Crawled
                                           </span>
                                         ) : (
-                                          <span className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">
+                                          <span className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded flex-shrink-0 whitespace-nowrap">
                                             Discovered
                                           </span>
                                         )}
