@@ -7,6 +7,16 @@ import { Input } from '@/components/ui/input'
 import { useParams } from 'next/navigation'
 import { toast } from '@/components/ui/use-toast'
 import SourcesSidebar from '@/components/agents/sources-sidebar'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { CustomSelect } from '@/components/ui/custom-select'
 import { FloatingActionBar } from '@/components/ui/floating-action-bar'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -71,6 +81,12 @@ export default function WebsitePage() {
   const [sortBy, setSortBy] = useState('Default')
   const [selectedWebsite, setSelectedWebsite] = useState<WebsiteSource | null>(null)
   const [selectedSubLink, setSelectedSubLink] = useState<SubLink | null>(null)
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    isOpen: boolean
+    sourceIds: string[]
+    sourceName?: string
+    onConfirm: () => void
+  }>({ isOpen: false, sourceIds: [], onConfirm: () => {} })
 
   const handleUrlChange = (value: string) => {
     // Remove any protocol if user types it in the input
@@ -324,32 +340,83 @@ export default function WebsitePage() {
     })
   }
 
+  const handleDeleteSingleSource = (source: WebsiteSource) => {
+    setDeleteConfirmation({
+      isOpen: true,
+      sourceIds: [source.id],
+      sourceName: source.url,
+      onConfirm: async () => {
+        try {
+          const response = await fetch(`/api/agents/${params.id}/sources/website`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sourceIds: [source.id] }),
+          })
+
+          if (!response.ok) throw new Error('Failed to delete website')
+
+          const data = await response.json()
+          toast({
+            title: 'Success',
+            description: data.message || 'Website deleted successfully',
+          })
+
+          setSources(sources.filter(s => s.id !== source.id))
+          setSelectedSources(new Set())
+          setShowRetrainingAlert(true)
+          setRefreshTrigger(prev => prev + 1)
+          setDeleteConfirmation({ isOpen: false, sourceIds: [], onConfirm: () => {} })
+        } catch (error) {
+          toast({
+            title: 'Error',
+            description: 'Failed to delete website',
+            variant: 'destructive',
+          })
+          setDeleteConfirmation({ isOpen: false, sourceIds: [], onConfirm: () => {} })
+        }
+      }
+    })
+  }
+
   const handleDeleteSources = async () => {
     if (selectedSources.size === 0) return
 
-    try {
-      const response = await fetch(`/api/agents/${params.id}/sources/website`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceIds: Array.from(selectedSources) }),
-      })
+    const sourceArray = Array.from(selectedSources)
+    setDeleteConfirmation({
+      isOpen: true,
+      sourceIds: sourceArray,
+      sourceName: sourceArray.length > 1 ? `${sourceArray.length} websites` : undefined,
+      onConfirm: async () => {
+        try {
+          const response = await fetch(`/api/agents/${params.id}/sources/website`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sourceIds: sourceArray }),
+          })
 
-      if (response.ok) {
-        setSources(sources.filter(s => !selectedSources.has(s.id)))
-        setSelectedSources(new Set())
-        setRefreshTrigger(prev => prev + 1)
-        toast({
-          title: 'Success',
-          description: `Deleted ${selectedSources.size} website(s)`,
-        })
+          if (!response.ok) throw new Error('Failed to delete websites')
+
+          const data = await response.json()
+          toast({
+            title: 'Success',
+            description: data.message || `Deleted ${sourceArray.length} website(s)`,
+          })
+
+          setSources(sources.filter(s => !selectedSources.has(s.id)))
+          setSelectedSources(new Set())
+          setShowRetrainingAlert(true)
+          setRefreshTrigger(prev => prev + 1)
+          setDeleteConfirmation({ isOpen: false, sourceIds: [], onConfirm: () => {} })
+        } catch (error) {
+          toast({
+            title: 'Error',
+            description: 'Failed to delete websites',
+            variant: 'destructive',
+          })
+          setDeleteConfirmation({ isOpen: false, sourceIds: [], onConfirm: () => {} })
+        }
       }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to delete websites',
-        variant: 'destructive',
-      })
-    }
+    })
   }
 
   const handleSelectAll = () => {
@@ -899,8 +966,7 @@ export default function WebsitePage() {
                                 </button>
                                 <button
                                   onClick={() => {
-                                    setSelectedSources(new Set([source.id]))
-                                    handleDeleteSources()
+                                    handleDeleteSingleSource(source)
                                     setOpenDropdown(null)
                                   }}
                                   className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 text-red-600 flex items-center gap-2"
@@ -1070,6 +1136,44 @@ export default function WebsitePage() {
         selectedCount={selectedSources.size}
         onDelete={handleDeleteSources}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteConfirmation.isOpen} onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          setDeleteConfirmation({ isOpen: false, sourceIds: [], onConfirm: () => {} })
+        }
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Website</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {deleteConfirmation.sourceName || 'this website'}?
+              {deleteConfirmation.sourceIds.length === 1 ? (
+                <>
+                  {' '}This action will remove the website from your sources.
+                  Untrained websites will be permanently deleted.
+                  Trained websites will be removed and permanently deleted when you retrain your agent.
+                </>
+              ) : (
+                <>
+                  {' '}This action will remove the selected websites from your sources.
+                  Untrained websites will be permanently deleted.
+                  Trained websites will be removed and permanently deleted when you retrain your agent.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteConfirmation.onConfirm}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
