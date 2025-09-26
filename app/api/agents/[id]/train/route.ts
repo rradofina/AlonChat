@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { EmbeddingService } from '@/lib/services/embedding-service'
 
 export const runtime = 'nodejs'
+export const maxDuration = 300 // 5 minutes for embedding generation
 
 export async function POST(
   request: NextRequest,
@@ -24,12 +26,15 @@ export async function POST(
 
     console.log('Starting training for agent:', params.id, agent.name)
 
-    // Mark all 'new' and 'restored' status files as 'ready' and set is_trained to true
+    // Check if request wants to generate embeddings
+    const body = await request.json().catch(() => ({}))
+    const generateEmbeddings = body.generateEmbeddings !== false // Default to true
+
+    // Mark all 'new' and 'restored' status files as 'ready'
     const { data: updatedSources, error: updateError } = await supabase
       .from('sources')
       .update({
         status: 'ready',
-        is_trained: true,
         updated_at: new Date().toISOString()
       })
       .eq('agent_id', params.id)
@@ -42,6 +47,42 @@ export async function POST(
         { error: 'Failed to update source training status' },
         { status: 500 }
       )
+    }
+
+    // Generate embeddings if enabled
+    let embeddingResults = {
+      success: false,
+      totalProcessed: 0,
+      totalFailed: 0,
+      totalCost: 0,
+      totalTokens: 0
+    }
+
+    if (generateEmbeddings) {
+      console.log('Generating embeddings for agent:', params.id)
+      try {
+        const embeddingService = new EmbeddingService()
+        embeddingResults = await embeddingService.generateEmbeddingsForAgent(params.id)
+
+        console.log('Embedding generation results:', embeddingResults)
+
+        // Mark sources as trained only if embeddings were successful
+        if (embeddingResults.success) {
+          await supabase
+            .from('sources')
+            .update({
+              is_trained: true,
+              embedding_model: 'text-embedding-3-small',
+              embedding_generated_at: new Date().toISOString(),
+              total_embedding_tokens: embeddingResults.totalTokens,
+              embedding_cost_usd: embeddingResults.totalCost
+            })
+            .eq('agent_id', params.id)
+        }
+      } catch (error) {
+        console.error('Error generating embeddings:', error)
+        // Continue even if embedding generation fails
+      }
     }
 
     // Permanently delete (hard delete) any 'removed' sources
@@ -95,16 +136,27 @@ export async function POST(
       agentId: params.id,
       sourcesUpdated: updatedSources?.length || 0,
       totalSources,
-      totalSizeKb
+      totalSizeKb,
+      embeddingsGenerated: embeddingResults.totalProcessed,
+      embeddingCost: embeddingResults.totalCost
     })
 
     return NextResponse.json({
       success: true,
-      message: `Training completed successfully. ${updatedSources?.length || 0} sources trained.`,
+      message: generateEmbeddings
+        ? `Training completed successfully. ${updatedSources?.length || 0} sources trained, ${embeddingResults.totalProcessed} embeddings generated.`
+        : `Training completed successfully. ${updatedSources?.length || 0} sources trained.`,
       stats: {
         sourcesUpdated: updatedSources?.length || 0,
         totalSources,
-        totalSizeKb
+        totalSizeKb,
+        embeddings: generateEmbeddings ? {
+          generated: embeddingResults.totalProcessed,
+          failed: embeddingResults.totalFailed,
+          tokens: embeddingResults.totalTokens,
+          cost: embeddingResults.totalCost,
+          model: 'text-embedding-3-small'
+        } : null
       }
     })
 

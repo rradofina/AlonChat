@@ -25,6 +25,21 @@ export interface ChatCompletionResult {
   finishReason?: string
 }
 
+export interface EmbeddingOptions {
+  input: string | string[]
+  model?: string
+}
+
+export interface EmbeddingResult {
+  embeddings: number[][]
+  model: string
+  usage: {
+    promptTokens: number
+    totalTokens: number
+  }
+  dimensions: number
+}
+
 export interface AIProvider {
   name: string
   initialize(config: Record<string, any>): Promise<void>
@@ -32,4 +47,6 @@ export interface AIProvider {
   isConfigured(): boolean
   getRequiredEnvVars(): string[]
   estimateCost(tokens: number, model: string): number
+  embed?(options: EmbeddingOptions): Promise<EmbeddingResult>
+  supportsEmbeddings?(): boolean
 }

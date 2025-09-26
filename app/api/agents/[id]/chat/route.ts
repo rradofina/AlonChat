@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { chatWithProjectCredentials } from '@/lib/ai/server-utils'
 import { ChatMessage } from '@/lib/ai/providers/base'
+import { EmbeddingService } from '@/lib/services/embedding-service'
 import { z } from 'zod'
 
 const ChatRequestSchema = z.object({
   message: z.string().min(1),
-  sessionId: z.string().optional()
+  sessionId: z.string().optional(),
+  useRAG: z.boolean().optional().default(true),
+  maxContextChunks: z.number().optional().default(5),
+  similarityThreshold: z.number().optional().default(0.7)
 })
 
 
@@ -42,19 +46,101 @@ export async function POST(
       return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
     }
 
-    // Get agent's sources for context
-    const { data: sources } = await supabase
-      .from('sources')
-      .select('content, name, type')
-      .eq('agent_id', agentId)
-      .eq('status', 'ready')
-
-    // Build context from sources
+    // Build context using RAG if enabled
     let context = ''
-    if (sources && sources.length > 0) {
-      context = sources.map(s => {
-        return `Source: ${s.name}\nType: ${s.type}\nContent: ${s.content}`
-      }).join('\n\n---\n\n')
+    let contextChunks: any[] = []
+    let ragEnabled = validatedData.useRAG
+
+    // Check if agent has embeddings
+    if (ragEnabled) {
+      const { data: embeddingCheck } = await supabase
+        .from('source_chunks')
+        .select('id')
+        .eq('agent_id', agentId)
+        .not('embedding', 'is', null)
+        .limit(1)
+
+      ragEnabled = !!(embeddingCheck && embeddingCheck.length > 0)
+    }
+
+    if (ragEnabled) {
+      console.log(`[Chat] Using RAG for agent ${agentId}`)
+
+      try {
+        // Use embedding service to find relevant chunks
+        const embeddingService = new EmbeddingService()
+        const similarChunks = await embeddingService.searchSimilarChunks(
+          agentId,
+          validatedData.message,
+          validatedData.maxContextChunks,
+          validatedData.similarityThreshold
+        )
+
+        if (similarChunks.length > 0) {
+          // Get source information for each chunk
+          const chunksWithSources = await Promise.all(
+            similarChunks.map(async (chunk) => {
+              const { data: sourceChunk } = await supabase
+                .from('source_chunks')
+                .select('source_id, position')
+                .eq('id', chunk.id)
+                .single()
+
+              if (sourceChunk) {
+                const { data: source } = await supabase
+                  .from('sources')
+                  .select('name, type')
+                  .eq('id', sourceChunk.source_id)
+                  .single()
+
+                return {
+                  ...chunk,
+                  source: source,
+                  position: sourceChunk.position
+                }
+              }
+              return chunk
+            })
+          )
+
+          // Build context from relevant chunks
+          context = chunksWithSources.map((chunk: any, index) => {
+            const sourceName = chunk.source?.name || 'Unknown'
+            const sourceType = chunk.source?.type || 'unknown'
+            return `[Context ${index + 1} - ${sourceName} (${sourceType}), Relevance: ${(chunk.similarity * 100).toFixed(1)}%]\n${chunk.content}`
+          }).join('\n\n')
+
+          contextChunks = chunksWithSources.map((c: any) => ({
+            id: c.id,
+            similarity: c.similarity,
+            source: c.source?.name
+          }))
+
+          console.log(`[Chat] Found ${similarChunks.length} relevant chunks`)
+        } else {
+          console.log('[Chat] No relevant chunks found')
+        }
+      } catch (error) {
+        console.error('[Chat] RAG error, falling back to traditional context:', error)
+        ragEnabled = false
+      }
+    }
+
+    // Fallback to traditional context loading if RAG is not available
+    if (!ragEnabled) {
+      console.log(`[Chat] Using traditional context for agent ${agentId}`)
+      const { data: sources } = await supabase
+        .from('sources')
+        .select('content, name, type')
+        .eq('agent_id', agentId)
+        .eq('status', 'ready')
+        .limit(5) // Limit sources to prevent context overflow
+
+      if (sources && sources.length > 0) {
+        context = sources.map(s => {
+          return `[Source: ${s.name} (${s.type})]\n${s.content?.substring(0, 2000) || ''}` // Limit content length
+        }).join('\n\n')
+      }
     }
 
     // Create session if needed
@@ -112,7 +198,8 @@ export async function POST(
           agent_id: agentId,
           project_id: agent.project_id,
           role: 'user',
-          content: validatedData.message
+          content: validatedData.message,
+          rag_enabled: ragEnabled
         })
     }
 
@@ -203,7 +290,7 @@ export async function POST(
       }
     }
 
-    // Store assistant response
+    // Store assistant response with context metadata
     if (conversation) {
       await supabase
         .from('messages')
@@ -212,14 +299,25 @@ export async function POST(
           agent_id: agentId,
           project_id: agent.project_id,
           role: 'assistant',
-          content: response
+          content: response,
+          rag_enabled: ragEnabled,
+          context_chunks: contextChunks.length > 0 ? contextChunks : null,
+          embedding_search_query: ragEnabled ? validatedData.message : null,
+          metadata: {
+            tokensUsed,
+            costUsd,
+            model: modelName,
+            contextChunksCount: contextChunks.length
+          }
         })
     }
 
     return NextResponse.json({
       response,
       sessionId,
-      tokensUsed
+      tokensUsed,
+      ragEnabled,
+      contextUsed: contextChunks.length
     })
 
   } catch (error) {
