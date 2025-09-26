@@ -16,6 +16,7 @@ export interface CrawlProgress {
   currentUrl: string
   phase: 'discovering' | 'processing'
   discoveredLinks?: string[]
+  completedPage?: CrawlResult  // Added for progressive processing
 }
 
 export class PlaywrightScraper {
@@ -62,11 +63,23 @@ export class PlaywrightScraper {
     }
 
     try {
-      // Launch browser
+      // Launch browser with optimized settings for lower memory usage
       console.log('Launching browser for crawling...')
       this.browser = await chromium.launch({
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-web-security',
+          '--disable-features=IsolateOrigins',
+          '--disable-site-isolation-trials',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--disable-extensions'
+        ]
       })
 
       // Report initial progress
@@ -111,6 +124,18 @@ export class PlaywrightScraper {
 
         // Track discovered links
         result.links.forEach(link => this.discoveredLinks.add(link))
+
+        // Report completed page in progress callback for progressive processing
+        if (this.onProgress) {
+          await this.onProgress({
+            current: results.length,
+            total: this.maxPages,
+            currentUrl: result.url,
+            phase: 'processing',
+            discoveredLinks: Array.from(this.discoveredLinks),
+            completedPage: result  // Pass the completed page for immediate processing
+          })
+        }
 
         // Add subpages to queue if enabled
         if (this.crawlSubpages && !result.error) {
@@ -168,6 +193,31 @@ export class PlaywrightScraper {
       // Set user agent to avoid detection
       await page.setExtraHTTPHeaders({
         'Accept-Language': 'en-US,en;q=0.9'
+      })
+
+      // Block unnecessary resources to save memory and speed up loading
+      await page.route('**/*', (route) => {
+        const resourceType = route.request().resourceType()
+        const url = route.request().url()
+
+        // Block resource-heavy content that's not needed for text extraction
+        const blockedTypes = ['image', 'media', 'font', 'stylesheet']
+        const blockedDomains = [
+          'googletagmanager.com',
+          'google-analytics.com',
+          'facebook.com',
+          'twitter.com',
+          'doubleclick.net',
+          'cloudflare.com/cdn-cgi',
+          'fontawesome.com'
+        ]
+
+        if (blockedTypes.includes(resourceType) ||
+            blockedDomains.some(domain => url.includes(domain))) {
+          route.abort()
+        } else {
+          route.continue()
+        }
       })
 
       // Navigate to the page

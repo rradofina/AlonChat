@@ -87,15 +87,29 @@ export default function ProjectPlansPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    // Get project plan
-    const { data: projects } = await supabase
+    // Get user's project first
+    const { data: project } = await supabase
       .from('projects')
-      .select('plan_tier')
+      .select('id')
       .eq('owner_id', user.id)
-      .limit(1)
+      .single()
 
-    if (projects && projects.length > 0) {
-      setCurrentPlan(projects[0].plan_tier || 'free')
+    if (!project) return
+
+    // Get project's subscription with plan details
+    const { data: subscription } = await supabase
+      .from('subscriptions')
+      .select('*, plan:plans(name, tier)')
+      .eq('project_id', project.id)
+      .single()
+
+    if (subscription && subscription.plan) {
+      // Map plan tier to display name
+      const planTier = subscription.plan.tier || 'free'
+      setCurrentPlan(planTier)
+    } else {
+      // No subscription means free plan
+      setCurrentPlan('free')
     }
   }
 

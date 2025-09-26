@@ -146,40 +146,7 @@ async function createTestData(userId: string) {
       agentId = agent.id
     }
 
-    // Add Google API key for testing (if not exists)
-    const { data: existingCreds } = await supabase
-      .from('ai_provider_credentials')
-      .select('*')
-      .eq('project_id', projectId)
-      .single()
-
-    if (!existingCreds) {
-      // Get Google provider ID
-      const { data: googleProvider } = await supabase
-        .from('ai_providers')
-        .select('id')
-        .eq('name', 'google')
-        .single()
-
-      if (googleProvider) {
-        const { error: credError } = await supabase
-          .from('ai_provider_credentials')
-          .insert({
-            project_id: projectId,
-            provider_id: googleProvider.id,
-            credentials: {
-              GOOGLE_AI_API_KEY: process.env.GOOGLE_AI_API_KEY || 'test-api-key'
-            },
-            is_active: true
-          })
-
-        if (credError && !credError.message.includes('duplicate')) {
-          console.error('Error adding credentials:', credError)
-        } else {
-          console.log('Test API credentials added')
-        }
-      }
-    }
+    // API keys are now provided via environment variables - no need to set per-project credentials
 
     console.log('\n✅ Test setup complete!')
     console.log('------------------------')

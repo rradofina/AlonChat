@@ -87,7 +87,7 @@ export default function GeneralSettingsPage() {
           <div>
             <h2 className="text-lg font-semibold text-gray-900 mb-2">Credits limit</h2>
             <p className="text-sm text-gray-600 mb-6">
-              Maximum credits to be used by this agent from the credits available on the workspace.
+              Maximum credits to be used by this agent from the credits available on the project.
             </p>
 
             <div className="space-y-6">

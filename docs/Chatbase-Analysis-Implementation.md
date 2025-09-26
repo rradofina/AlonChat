@@ -1,5 +1,8 @@
 # Chatbase Analysis & AlonChat Implementation Guide
 
+> ⚠️ **HISTORICAL DOCUMENT** - This file contains outdated references to "workspaces" and old database structure.
+> The project now uses "projects" instead. See [CURRENT_ARCHITECTURE.md](./CURRENT_ARCHITECTURE.md) for the current structure.
+
 **Based on Screenshot Analysis**
 **Date:** September 22, 2025
 **Purpose:** Comprehensive analysis of Chatbase.co UI/UX patterns and architecture to guide AlonChat implementation

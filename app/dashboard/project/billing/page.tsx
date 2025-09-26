@@ -13,7 +13,7 @@ interface BillingHistory {
   status: string
 }
 
-export default function WorkspaceBillingPage() {
+export default function ProjectBillingPage() {
   const [billingEmail, setBillingEmail] = useState('')
   const [taxType, setTaxType] = useState('None')
   const [taxId, setTaxId] = useState('')
@@ -39,8 +39,20 @@ export default function WorkspaceBillingPage() {
       .single()
 
     if (project) {
-      setBillingEmail(project.billing_email || user.email || '')
-      setTaxId(project.tax_id || '')
+      // Get subscription for billing data
+      const { data: subscription } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('project_id', project.id)
+        .single()
+
+      if (subscription) {
+        setBillingEmail(subscription.billing_email || user.email || '')
+        setTaxId(subscription.tax_id || '')
+        setTaxType(subscription.tax_type || 'None')
+      } else {
+        setBillingEmail(user.email || '')
+      }
 
       // Load billing history
       const { data: history } = await supabase
@@ -72,11 +84,20 @@ export default function WorkspaceBillingPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      const { error } = await supabase
+      // Get the current project
+      const { data: project } = await supabase
         .from('projects')
-        .update({ billing_email: billingEmail })
+        .select('id')
         .eq('owner_id', user.id)
         .single()
+
+      if (!project) throw new Error('No project found')
+
+      // Update subscription billing email
+      const { error } = await supabase
+        .from('subscriptions')
+        .update({ billing_email: billingEmail })
+        .eq('project_id', project.id)
 
       if (error) throw error
       toast.success('Billing email updated successfully')
@@ -94,14 +115,23 @@ export default function WorkspaceBillingPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      const { error } = await supabase
+      // Get the current project
+      const { data: project } = await supabase
         .from('projects')
+        .select('id')
+        .eq('owner_id', user.id)
+        .single()
+
+      if (!project) throw new Error('No project found')
+
+      // Update subscription tax info
+      const { error } = await supabase
+        .from('subscriptions')
         .update({
           tax_type: taxType,
           tax_id: taxId
         })
-        .eq('owner_id', user.id)
-        .single()
+        .eq('project_id', project.id)
 
       if (error) throw error
       toast.success('Tax information updated successfully')

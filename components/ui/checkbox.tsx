@@ -3,12 +3,14 @@
 import * as React from 'react'
 import { Check } from 'lucide-react'
 
-interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {
+interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'onChange'> {
   className?: string
+  onCheckedChange?: (checked: boolean) => void
+  onChange?: React.ChangeEventHandler<HTMLInputElement>
 }
 
 export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
-  ({ className = '', checked, onChange, ...props }, ref) => {
+  ({ className = '', checked, onChange, onCheckedChange, ...props }, ref) => {
     return (
       <div className="relative inline-block">
         <input
@@ -21,8 +23,11 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
         />
         <div
           onClick={() => {
-            if (onChange) {
-              onChange({ target: { checked: !checked } } as any)
+            const newChecked = !checked
+            if (onCheckedChange) {
+              onCheckedChange(newChecked)
+            } else if (onChange) {
+              onChange({ target: { checked: newChecked } } as any)
             }
           }}
           className={`

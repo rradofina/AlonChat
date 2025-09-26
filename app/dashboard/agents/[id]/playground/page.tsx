@@ -7,7 +7,7 @@ import { Send, Bot, User, RefreshCw, Copy, Download, Save, Smile, Lightbulb } fr
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { configService, AIModel, PromptPreset } from '@/lib/api/config'
-import { ModelSelector, type Model } from '@/components/ui/model-selector'
+import { ModelDropdown } from '@/components/ui/model-dropdown'
 
 interface Message {
   id: string
@@ -54,6 +54,11 @@ export default function PlaygroundPage() {
         configService.getPromptPresets()
       ])
 
+      console.log('Loaded models:', models)
+      console.log('Models count:', models.length)
+      console.log('First model:', models[0])
+      console.log('Models are array?', Array.isArray(models))
+      console.log('Models stringified:', JSON.stringify(models))
       setAvailableModels(models)
       setAvailablePresets(presets)
 
@@ -70,6 +75,8 @@ export default function PlaygroundPage() {
     } catch (error) {
       console.error('Error loading configuration:', error)
       toast.error('Failed to load configuration')
+      // Set loading to false even on error so dropdown isn't permanently disabled
+      setLoadingConfig(false)
     } finally {
       setLoadingConfig(false)
     }
@@ -268,23 +275,20 @@ export default function PlaygroundPage() {
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Model
           </label>
-          <ModelSelector
+          <ModelDropdown
             models={availableModels.map(model => ({
               id: model.id,
               name: model.name,
               display_name: model.display_name,
               provider: model.provider,
               description: model.description,
-              context_window: model.context_window,
-              max_tokens: model.max_tokens,
-              capabilities: model.request_template?.capabilities || {},
-              cost: model.request_template?.pricing ? {
-                input: model.request_template.pricing.input_per_million ? model.request_template.pricing.input_per_million / 1000 : 0,
-                output: model.request_template?.pricing.output_per_million ? model.request_template.pricing.output_per_million / 1000 : 0,
-              } : undefined
+              message_credits: model.message_credits,
             }))}
-            value={availableModels.find(m => m.name === selectedModel || m.model_id === selectedModel)?.name || selectedModel}
-            onValueChange={(value) => setSelectedModel(value)}
+            value={selectedModel}
+            onValueChange={(value) => {
+              console.log('Model selected:', value)
+              setSelectedModel(value)
+            }}
             placeholder={loadingConfig ? "Loading models..." : "Select a model..."}
             disabled={loadingConfig}
           />

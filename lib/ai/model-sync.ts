@@ -484,21 +484,11 @@ export async function syncModelsToDatabase() {
 export async function getAvailableModels(projectId: string) {
   const supabase = await createClient()
 
-  // Get models with provider credentials configured
+  // Get all active models (using platform API keys from environment variables)
   const { data: models } = await supabase
     .from('ai_models')
-    .select(`
-      *,
-      ai_providers!inner(
-        id,
-        name,
-        ai_provider_credentials!inner(
-          id
-        )
-      )
-    `)
+    .select('*')
     .eq('is_active', true)
-    .eq('ai_providers.ai_provider_credentials.project_id', projectId)
     .order('provider')
     .order('sort_order')
 

@@ -2,165 +2,293 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent
+} from '@dnd-kit/core'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { AddModelDialog } from '@/components/admin/add-model-dialog'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
-import { Plus, Save, Trash2, Settings, Key, Database } from 'lucide-react'
+import {
+  RefreshCw,
+  Database,
+  Globe,
+  Cpu,
+  Eye,
+  EyeOff,
+  Settings,
+  AlertCircle,
+  CheckCircle,
+  Loader2,
+  Trash2,
+  Save,
+  Edit2,
+  X,
+  DollarSign,
+  Copy,
+  Zap,
+  FileText,
+  Hash,
+  Brain,
+  GripVertical,
+  Wifi,
+  WifiOff,
+  ToggleLeft,
+  ToggleRight,
+  ArrowLeft,
+} from 'lucide-react'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
-interface AIModel {
-  id?: string
+interface Model {
+  id: string
   name: string
   display_name: string
   provider: string
   model_id: string
-  description?: string
-  context_window?: number
-  max_tokens?: number
+  context_window: number
+  max_tokens: number
+  description: string | null
   is_active: boolean
+  updated_at: string
+  message_credits: number
+  input_price_per_million: number | null
+  output_price_per_million: number | null
+  supports_vision: boolean
+  supports_functions: boolean
+  supports_streaming: boolean
+  speed: 'fast' | 'medium' | 'slow' | null
   sort_order: number
+  last_test_status?: 'untested' | 'testing' | 'success' | 'error' | null
+  last_test_message?: string | null
+  last_tested_at?: string | null
 }
 
-interface AIProvider {
+interface EditingModel {
   id: string
-  name: string
-  display_name: string
-  provider_class: string
-  api_base_url?: string
-  required_env_vars: string[]
-  is_active: boolean
-  is_builtin: boolean
+  field: string
 }
 
-export default function AdminModelsPage() {
-  const [models, setModels] = useState<AIModel[]>([])
-  const [providers, setProviders] = useState<AIProvider[]>([])
+// SortableRow component for drag and drop
+function SortableRow({ model, children }: { model: Model; children: React.ReactNode }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: model.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  return (
+    <TableRow ref={setNodeRef} style={style} className={isDragging ? 'bg-gray-50' : ''}>
+      <TableCell className="w-12">
+        <div {...attributes} {...listeners} className="cursor-move p-1 hover:bg-gray-100 rounded">
+          <GripVertical className="h-4 w-4 text-gray-400" />
+        </div>
+      </TableCell>
+      {children}
+    </TableRow>
+  )
+}
+
+import { useRouter } from 'next/navigation'
+
+export default function ModelsAdminPage() {
+  const router = useRouter()
+  const [models, setModels] = useState<Model[]>([])
   const [loading, setLoading] = useState(true)
-  const [editingModel, setEditingModel] = useState<AIModel | null>(null)
-  const [newModel, setNewModel] = useState<AIModel>({
-    name: '',
-    display_name: '',
-    provider: '',
-    model_id: '',
-    description: '',
-    context_window: 128000,
-    max_tokens: 4096,
-    is_active: true,
-    sort_order: 999
-  })
+  const [discovering, setDiscovering] = useState(false)
+  const [selectedProvider, setSelectedProvider] = useState<string>('all')
+  const [editingCell, setEditingCell] = useState<EditingModel | null>(null)
+  const [editValues, setEditValues] = useState<Record<string, any>>({})
+  const [saving, setSaving] = useState<string | null>(null)
+  const [testingAll, setTestingAll] = useState(false)
+  const [testProgress, setTestProgress] = useState({ current: 0, total: 0 })
   const supabase = createClient()
 
   useEffect(() => {
-    checkAdminAccess()
+    loadModels()
   }, [])
 
-  async function checkAdminAccess() {
-    const { data: { user } } = await supabase.auth.getUser()
-
-    // Add your admin user IDs here
-    const adminUserIds = [
-      'your-user-id-here', // Replace with your actual user ID
-    ]
-
-    // For development, allow all authenticated users
-    // Remove this in production
-    if (user) {
-      loadData()
-    } else {
-      window.location.href = '/login'
-    }
-  }
-
-  async function loadData() {
+  const loadModels = async () => {
     try {
-      // Load models
-      const { data: modelsData } = await supabase
+      setLoading(true)
+      const { data, error } = await supabase
         .from('ai_models')
         .select('*')
+        .order('provider')
+        .order('message_credits')
         .order('sort_order')
 
-      // Load providers
-      const { data: providersData } = await supabase
-        .from('ai_providers')
-        .select('*')
-        .order('display_name')
-
-      setModels(modelsData || [])
-      setProviders(providersData || [])
+      if (error) throw error
+      setModels(data || [])
     } catch (error) {
-      console.error('Error loading data:', error)
-      toast.error('Failed to load data')
+      console.error('Error loading models:', error)
+      toast.error('Failed to load models')
     } finally {
       setLoading(false)
     }
   }
 
-  async function saveModel(model: AIModel) {
+  const testModelConnection = async (model: Model) => {
+    // Update local state to show testing
+    setModels(prev => prev.map(m =>
+      m.id === model.id ? { ...m, last_test_status: 'testing' as const } : m
+    ))
+
     try {
-      if (model.id) {
-        // Update existing model
-        const { error } = await supabase
-          .from('ai_models')
-          .update({
-            display_name: model.display_name,
-            provider: model.provider,
-            model_id: model.model_id,
-            description: model.description,
-            context_window: model.context_window,
-            max_tokens: model.max_tokens,
-            is_active: model.is_active,
-            sort_order: model.sort_order,
-            updated_at: new Date().toISOString()
-          } as any)
-          .eq('id', model.id)
-
-        if (error) throw error
-        toast.success('Model updated successfully')
-      } else {
-        // Create new model
-        const { error } = await supabase
-          .from('ai_models')
-          .insert({
-            name: model.name,
-            display_name: model.display_name,
-            provider: model.provider,
-            model_id: model.model_id,
-            description: model.description,
-            context_window: model.context_window,
-            max_tokens: model.max_tokens,
-            is_active: model.is_active,
-            sort_order: model.sort_order
-          } as any)
-
-        if (error) throw error
-        toast.success('Model created successfully')
-
-        // Reset new model form
-        setNewModel({
-          name: '',
-          display_name: '',
-          provider: '',
-          model_id: '',
-          description: '',
-          context_window: 128000,
-          max_tokens: 4096,
-          is_active: true,
-          sort_order: 999
+      const response = await fetch('/api/admin/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: model.provider,
+          modelId: model.model_id
         })
+      })
+
+      const result = await response.json()
+
+      const testStatus = result.success ? 'success' : 'error'
+      const testMessage = result.success ? result.message : result.error
+      const testedAt = new Date().toISOString()
+
+      // Update database
+      const { error: updateError } = await supabase
+        .from('ai_models')
+        .update({
+          last_test_status: testStatus,
+          last_test_message: testMessage,
+          last_tested_at: testedAt
+        })
+        .eq('id', model.id)
+
+      if (updateError) {
+        console.error('Failed to save test status:', updateError)
       }
 
-      await loadData()
-      setEditingModel(null)
-    } catch (error: any) {
-      console.error('Error saving model:', error)
-      toast.error(error.message || 'Failed to save model')
+      // Update local state
+      setModels(prev => prev.map(m =>
+        m.id === model.id
+          ? { ...m, last_test_status: testStatus, last_test_message: testMessage, last_tested_at: testedAt }
+          : m
+      ))
+
+      if (result.success) {
+        toast.success(`${model.display_name} test successful`)
+      } else {
+        toast.error(result.error || `${model.display_name} test failed`)
+      }
+    } catch (error) {
+      console.error('Model test error:', error)
+
+      // Update database with error
+      const testMessage = 'Test failed'
+      const testedAt = new Date().toISOString()
+
+      await supabase
+        .from('ai_models')
+        .update({
+          last_test_status: 'error',
+          last_test_message: testMessage,
+          last_tested_at: testedAt
+        })
+        .eq('id', model.id)
+
+      // Update local state
+      setModels(prev => prev.map(m =>
+        m.id === model.id
+          ? { ...m, last_test_status: 'error' as const, last_test_message: testMessage, last_tested_at: testedAt }
+          : m
+      ))
+
+      toast.error('Model test failed')
     }
   }
 
-  async function deleteModel(modelId: string) {
+  const discoverModels = async () => {
+    try {
+      setDiscovering(true)
+      const response = await fetch('/api/admin/discover-models', {
+        method: 'POST',
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to discover models')
+      }
+
+      const result = await response.json()
+      toast.success(`Discovered ${result.discovered} models from ${result.providers} providers`)
+      await loadModels()
+    } catch (error) {
+      console.error('Error discovering models:', error)
+      toast.error('Failed to discover models')
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
+  const toggleModel = async (modelId: string, isActive: boolean) => {
+    try {
+      const { error } = await supabase
+        .from('ai_models')
+        .update({ is_active: isActive })
+        .eq('id', modelId)
+
+      if (error) throw error
+
+      setModels(prev => prev.map(m =>
+        m.id === modelId ? { ...m, is_active: isActive } : m
+      ))
+
+      toast.success(`Model ${isActive ? 'enabled' : 'disabled'}`)
+    } catch (error) {
+      console.error('Error toggling model:', error)
+      toast.error('Failed to update model')
+    }
+  }
+
+  const deleteModel = async (modelId: string) => {
     if (!confirm('Are you sure you want to delete this model?')) return
 
     try {
@@ -170,294 +298,859 @@ export default function AdminModelsPage() {
         .eq('id', modelId)
 
       if (error) throw error
-      toast.success('Model deleted successfully')
-      await loadData()
+
+      setModels(prev => prev.filter(m => m.id !== modelId))
+      toast.success('Model deleted')
     } catch (error) {
       console.error('Error deleting model:', error)
       toast.error('Failed to delete model')
     }
   }
 
-  async function toggleModelStatus(modelId: string, isActive: boolean) {
+  const duplicateModel = async (model: Model) => {
+    try {
+      // Generate a unique name by appending a number
+      const existingNames = models.filter(m => m.name.startsWith(model.name)).map(m => m.name)
+      let copyNumber = 1
+      let newName = `${model.name}-copy`
+      while (existingNames.includes(newName)) {
+        copyNumber++
+        newName = `${model.name}-copy-${copyNumber}`
+      }
+
+      // Create the duplicate with modified name and model_id
+      const newModel = {
+        ...model,
+        name: newName,
+        model_id: `${model.model_id}-copy`,
+        display_name: `${model.display_name} (Copy)`,
+        is_active: false // Start as inactive
+      }
+
+      // Remove the id field so a new one is generated
+      delete (newModel as any).id
+      delete (newModel as any).created_at
+      delete (newModel as any).updated_at
+
+      const { data, error } = await supabase
+        .from('ai_models')
+        .insert([newModel])
+        .select()
+        .single()
+
+      if (error) throw error
+
+      setModels(prev => [...prev, data])
+      toast.success(`Created copy: ${newName}`)
+    } catch (error) {
+      console.error('Error duplicating model:', error)
+      toast.error('Failed to duplicate model')
+    }
+  }
+
+  const toggleBooleanField = async (modelId: string, field: string, currentValue: boolean) => {
     try {
       const { error } = await supabase
         .from('ai_models')
-        .update({ is_active: isActive } as any)
+        .update({ [field]: !currentValue })
         .eq('id', modelId)
 
       if (error) throw error
-      await loadData()
+
+      setModels(prev => prev.map(m =>
+        m.id === modelId ? { ...m, [field]: !currentValue } : m
+      ))
+
+      toast.success('Model updated')
     } catch (error) {
-      console.error('Error updating model status:', error)
-      toast.error('Failed to update model status')
+      console.error('Error updating model:', error)
+      toast.error('Failed to update model')
+    }
+  }
+
+  const startEdit = (modelId: string, field: string, currentValue: any) => {
+    setEditingCell({ id: modelId, field })
+    setEditValues({ [`${modelId}-${field}`]: currentValue ?? '' })
+  }
+
+  const cancelEdit = () => {
+    setEditingCell(null)
+    setEditValues({})
+  }
+
+  const saveEdit = async (modelId: string, field: string) => {
+    const value = editValues[`${modelId}-${field}`]
+
+    try {
+      setSaving(`${modelId}-${field}`)
+
+      // Convert values based on field type
+      let finalValue = value
+      if (['message_credits', 'context_window', 'max_tokens'].includes(field)) {
+        finalValue = parseInt(value) || 0
+      } else if (['input_price_per_million', 'output_price_per_million'].includes(field)) {
+        finalValue = parseFloat(value) || null
+      } else if (['supports_vision', 'supports_functions', 'supports_streaming'].includes(field)) {
+        finalValue = value === 'true'
+      }
+
+      const { error } = await supabase
+        .from('ai_models')
+        .update({ [field]: finalValue })
+        .eq('id', modelId)
+
+      if (error) throw error
+
+      setModels(prev => prev.map(m =>
+        m.id === modelId ? { ...m, [field]: finalValue } : m
+      ))
+
+      setEditingCell(null)
+      setEditValues({})
+      toast.success('Model updated')
+    } catch (error) {
+      console.error('Error saving model:', error)
+      toast.error('Failed to save changes')
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  const renderEditableCell = (model: Model, field: string, value: any) => {
+    const isEditing = editingCell?.id === model.id && editingCell?.field === field
+    const editKey = `${model.id}-${field}`
+
+    if (isEditing) {
+      const inputType = ['message_credits', 'context_window', 'max_tokens', 'input_price_per_million', 'output_price_per_million'].includes(field) ? 'number' : 'text'
+
+      if (field === 'speed') {
+        return (
+          <div className="flex items-center gap-2">
+            <Select
+              value={editValues[editKey] || ''}
+              onValueChange={(val) => setEditValues({ ...editValues, [editKey]: val })}
+            >
+              <SelectTrigger className="h-8 w-24">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fast">Fast</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="slow">Slow</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => saveEdit(model.id, field)}
+              disabled={saving === editKey}
+            >
+              {saving === editKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={cancelEdit}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )
+      }
+
+      if (['supports_vision', 'supports_functions', 'supports_streaming'].includes(field)) {
+        return (
+          <div className="flex items-center gap-2">
+            <Select
+              value={editValues[editKey]?.toString() || ''}
+              onValueChange={(val) => setEditValues({ ...editValues, [editKey]: val })}
+            >
+              <SelectTrigger className="h-8 w-20">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="true">Yes</SelectItem>
+                <SelectItem value="false">No</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => saveEdit(model.id, field)}
+              disabled={saving === editKey}
+            >
+              {saving === editKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={cancelEdit}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )
+      }
+
+      if (field === 'description') {
+        return (
+          <div className="flex items-center gap-2">
+            <Textarea
+              value={editValues[editKey] || ''}
+              onChange={(e) => setEditValues({ ...editValues, [editKey]: e.target.value })}
+              className="min-h-[60px] text-xs"
+              placeholder="Enter description..."
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => saveEdit(model.id, field)}
+              disabled={saving === editKey}
+            >
+              {saving === editKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={cancelEdit}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )
+      }
+
+      // Determine input width based on field type
+      const inputWidth = field === 'model_id' ? 'w-48' : field === 'display_name' ? 'w-32' : 'w-24'
+
+      return (
+        <div className="flex items-center gap-2">
+          <Input
+            type={inputType}
+            value={editValues[editKey] || ''}
+            onChange={(e) => setEditValues({ ...editValues, [editKey]: e.target.value })}
+            className={`h-8 ${inputWidth}`}
+            step={inputType === 'number' ? '0.01' : undefined}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => saveEdit(model.id, field)}
+            disabled={saving === editKey}
+          >
+            {saving === editKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={cancelEdit}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      )
+    }
+
+    return (
+      <div
+        className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded"
+        onClick={() => startEdit(model.id, field, value)}
+      >
+        {field === 'description' ? (
+          <span className="text-xs text-muted-foreground truncate max-w-[300px]">
+            {value || 'No description'}
+          </span>
+        ) : field === 'speed' ? (
+          <Badge variant={value === 'fast' ? 'default' : value === 'medium' ? 'secondary' : 'outline'}>
+            {value || 'Not set'}
+          </Badge>
+        ) : ['supports_vision', 'supports_functions', 'supports_streaming'].includes(field) ? (
+          value ? <CheckCircle className="h-4 w-4 text-green-500" /> : <X className="h-4 w-4 text-gray-400" />
+        ) : (
+          <span className="text-sm">{value ?? '-'}</span>
+        )}
+        <Edit2 className="h-3 w-3 text-gray-400" />
+      </div>
+    )
+  }
+
+  const filteredModels = selectedProvider === 'all'
+    ? models
+    : models.filter(m => m.provider === selectedProvider)
+
+  // Fixed list of available providers (not dependent on existing models)
+  const availableProviders = ['openai', 'google', 'anthropic', 'xai']
+
+  // Providers that have models (for the filter tabs)
+  const providers = [...new Set(models.map(m => m.provider))]
+
+  const getProviderIcon = (provider: string) => {
+    switch (provider) {
+      case 'openai': return <Brain className="h-4 w-4" />
+      case 'google': return <Globe className="h-4 w-4" />
+      case 'anthropic': return <Cpu className="h-4 w-4" />
+      case 'xai': return <Zap className="h-4 w-4" />
+      default: return <Database className="h-4 w-4" />
+    }
+  }
+
+  const getCreditBadgeColor = (credits: number) => {
+    if (credits === 1) return 'bg-green-100 text-green-700'
+    if (credits <= 5) return 'bg-yellow-100 text-yellow-700'
+    if (credits <= 10) return 'bg-orange-100 text-orange-700'
+    return 'bg-red-100 text-red-700'
+  }
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
+  const bulkToggleModels = async (action: 'enable-all' | 'disable-all' | 'enable-tested-only' | 'disable-untested') => {
+    let modelsToEnable: Model[] = []
+    let modelsToDisable: Model[] = []
+    let actionMessage = ''
+
+    switch (action) {
+      case 'enable-all':
+        modelsToEnable = filteredModels.filter(m => !m.is_active)
+        actionMessage = `Enabled ${modelsToEnable.length} models`
+        break
+      case 'disable-all':
+        modelsToDisable = filteredModels.filter(m => m.is_active)
+        actionMessage = `Disabled ${modelsToDisable.length} models`
+        break
+      case 'enable-tested-only':
+        // Enable models that passed testing, disable all others
+        modelsToEnable = filteredModels.filter(m => !m.is_active && m.last_test_status === 'success')
+        modelsToDisable = filteredModels.filter(m => m.is_active && m.last_test_status !== 'success')
+        actionMessage = `Enabled ${modelsToEnable.length} tested models, disabled ${modelsToDisable.length} untested/failed models`
+        break
+      case 'disable-untested':
+        // Disable models that haven't been tested or failed testing
+        modelsToDisable = filteredModels.filter(m => {
+          return m.is_active && (m.last_test_status === 'error' || m.last_test_status === 'untested' || !m.last_test_status)
+        })
+        actionMessage = `Disabled ${modelsToDisable.length} untested/failed models`
+        break
+    }
+
+    if (modelsToEnable.length === 0 && modelsToDisable.length === 0) {
+      toast.info('No models to update')
+      return
+    }
+
+    try {
+      // Update all models in parallel
+      const promises = [
+        ...modelsToEnable.map(model =>
+          supabase
+            .from('ai_models')
+            .update({ is_active: true })
+            .eq('id', model.id)
+        ),
+        ...modelsToDisable.map(model =>
+          supabase
+            .from('ai_models')
+            .update({ is_active: false })
+            .eq('id', model.id)
+        )
+      ]
+
+      await Promise.all(promises)
+
+      // Update local state
+      setModels(prev => prev.map(m => {
+        const shouldEnable = modelsToEnable.some(em => em.id === m.id)
+        const shouldDisable = modelsToDisable.some(dm => dm.id === m.id)
+
+        if (shouldEnable) return { ...m, is_active: true }
+        if (shouldDisable) return { ...m, is_active: false }
+        return m
+      }))
+
+      toast.success(actionMessage)
+    } catch (error) {
+      console.error('Error bulk updating models:', error)
+      toast.error('Failed to update models')
+    }
+  }
+
+  const testAllModels = async () => {
+    // Get models to test based on current provider filter
+    const modelsToTest = filteredModels.filter(m => m.is_active)
+
+    if (modelsToTest.length === 0) {
+      toast.error('No active models to test')
+      return
+    }
+
+    setTestingAll(true)
+    setTestProgress({ current: 0, total: modelsToTest.length })
+
+    let tested = 0
+    let passed = 0
+    let failed = 0
+
+    // Test in batches of 3 to avoid rate limits
+    const batchSize = 3
+    for (let i = 0; i < modelsToTest.length; i += batchSize) {
+      const batch = modelsToTest.slice(i, i + batchSize)
+
+      // Test batch in parallel
+      const promises = batch.map(async (model) => {
+        try {
+          // Mark as testing in local state
+          setModels(prev => prev.map(m =>
+            m.id === model.id ? { ...m, last_test_status: 'testing' as const } : m
+          ))
+
+          const response = await fetch('/api/admin/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              provider: model.provider,
+              modelId: model.model_id
+            })
+          })
+
+          const result = await response.json()
+
+          const testStatus = result.success ? 'success' : 'error'
+          const testMessage = result.success ? 'Test passed' : result.error
+          const testedAt = new Date().toISOString()
+
+          // Update database
+          await supabase
+            .from('ai_models')
+            .update({
+              last_test_status: testStatus,
+              last_test_message: testMessage,
+              last_tested_at: testedAt
+            })
+            .eq('id', model.id)
+
+          // Update local state
+          setModels(prev => prev.map(m =>
+            m.id === model.id
+              ? { ...m, last_test_status: testStatus, last_test_message: testMessage, last_tested_at: testedAt }
+              : m
+          ))
+
+          if (result.success) passed++
+          else failed++
+        } catch (error) {
+          failed++
+
+          const testMessage = 'Test failed'
+          const testedAt = new Date().toISOString()
+
+          // Update database with error
+          await supabase
+            .from('ai_models')
+            .update({
+              last_test_status: 'error',
+              last_test_message: testMessage,
+              last_tested_at: testedAt
+            })
+            .eq('id', model.id)
+
+          // Update local state
+          setModels(prev => prev.map(m =>
+            m.id === model.id
+              ? { ...m, last_test_status: 'error' as const, last_test_message: testMessage, last_tested_at: testedAt }
+              : m
+          ))
+        } finally {
+          tested++
+          setTestProgress({ current: tested, total: modelsToTest.length })
+        }
+      })
+
+      await Promise.all(promises)
+
+      // Small delay between batches to avoid rate limits
+      if (i + batchSize < modelsToTest.length) {
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+    }
+
+    setTestingAll(false)
+    setTestProgress({ current: 0, total: 0 })
+
+    // Show summary
+    const providerName = selectedProvider === 'all' ? '' : ` ${selectedProvider}`
+    toast.success(`Tested ${tested}${providerName} models: ✅ ${passed} passed, ❌ ${failed} failed`)
+  }
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event
+
+    if (over && active.id !== over.id) {
+      const oldIndex = filteredModels.findIndex(m => m.id === active.id)
+      const newIndex = filteredModels.findIndex(m => m.id === over.id)
+
+      const reorderedModels = arrayMove(filteredModels, oldIndex, newIndex)
+
+      // Update sort_order for all affected models
+      const updates = reorderedModels.map((model, index) => ({
+        ...model,
+        sort_order: (index + 1) * 10
+      }))
+
+      setModels(prevModels => {
+        const otherModels = prevModels.filter(m =>
+          selectedProvider === 'all' ? false : m.provider !== selectedProvider
+        )
+        return [...otherModels, ...updates].sort((a, b) => a.sort_order - b.sort_order)
+      })
+
+      // Update in database
+      for (const model of updates) {
+        await supabase
+          .from('ai_models')
+          .update({ sort_order: model.sort_order })
+          .eq('id', model.id)
+      }
+
+      toast.success('Model order updated')
     }
   }
 
   if (loading) {
-    return <div className="p-6">Loading...</div>
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Admin Header */}
-      <div className="bg-red-600 text-white p-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Database className="h-6 w-6" />
-            <h1 className="text-xl font-bold">Admin Panel - Model Management</h1>
-            <span className="bg-red-800 px-2 py-1 rounded text-xs">RESTRICTED ACCESS</span>
+    <div className="container mx-auto p-6 max-w-full">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => router.push('/dashboard')}
+            className="h-10 w-10"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold">Model Management</h1>
+            <p className="text-muted-foreground">Configure AI models, pricing, and capabilities</p>
           </div>
-          <div className="flex gap-4">
-            <Button
-              className="bg-red-700 text-white hover:bg-red-800 border-red-800"
-              onClick={() => window.location.href = '/admin/providers'}
-            >
-              <Settings className="h-4 w-4 mr-2" />
-              Manage Providers
-            </Button>
-            <Button
-              className="bg-red-700 text-white hover:bg-red-800 border-red-800"
-              onClick={() => window.location.href = '/dashboard'}
-            >
-              Back to Dashboard
-            </Button>
-          </div>
+        </div>
+
+        <div className="flex gap-2">
+          <Button
+            onClick={loadModels}
+            variant="outline"
+            className="h-10"
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+          <AddModelDialog
+            onModelAdded={loadModels}
+            providers={availableProviders}
+          />
+          <Button
+            onClick={discoverModels}
+            disabled={discovering}
+            className="h-10"
+          >
+            {discovering ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Database className="h-4 w-4 mr-2" />
+            )}
+            Discover Models
+          </Button>
+          <Button
+            onClick={testAllModels}
+            disabled={testingAll}
+            variant="secondary"
+            className="h-10"
+          >
+            {testingAll ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Testing {testProgress.current}/{testProgress.total}...
+              </>
+            ) : (
+              <>
+                <Wifi className="h-4 w-4 mr-2" />
+                Test All {selectedProvider !== 'all' && selectedProvider.charAt(0).toUpperCase() + selectedProvider.slice(1)}
+                {' '}({filteredModels.filter(m => m.is_active).length})
+              </>
+            )}
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="h-10">
+                <ToggleRight className="h-4 w-4 mr-2" />
+                Bulk Toggle
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => bulkToggleModels('enable-all')}>
+                <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                Enable All
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => bulkToggleModels('disable-all')}>
+                <X className="h-4 w-4 mr-2 text-red-500" />
+                Disable All
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => bulkToggleModels('enable-tested-only')}>
+                <Wifi className="h-4 w-4 mr-2 text-green-500" />
+                Enable Tested Only (Disable Others)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => bulkToggleModels('disable-untested')}>
+                <WifiOff className="h-4 w-4 mr-2 text-red-500" />
+                Disable Untested/Failed
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto p-6">
-        {/* Add New Model */}
-        <Card className="mb-6 border-2 border-blue-200 bg-blue-50">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Plus className="h-5 w-5" />
-              Add New AI Model
-            </CardTitle>
-            <CardDescription>
-              Add a new model to the system. Users will be able to select this model if they have the required API keys.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Internal Name (unique, lowercase)</Label>
-                <Input
-                  value={newModel.name}
-                  onChange={(e) => setNewModel({ ...newModel, name: e.target.value.toLowerCase().replace(/\s+/g, '-') })}
-                  placeholder="gpt-4-turbo"
-                />
-              </div>
-              <div>
-                <Label>Display Name</Label>
-                <Input
-                  value={newModel.display_name}
-                  onChange={(e) => setNewModel({ ...newModel, display_name: e.target.value })}
-                  placeholder="GPT-4 Turbo"
-                />
-              </div>
-              <div>
-                <Label>Provider</Label>
-                <Select value={newModel.provider} onValueChange={(v) => setNewModel({ ...newModel, provider: v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {providers.map(p => (
-                      <SelectItem key={p.id} value={p.name}>{p.display_name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Model ID (API identifier)</Label>
-                <Input
-                  value={newModel.model_id}
-                  onChange={(e) => setNewModel({ ...newModel, model_id: e.target.value })}
-                  placeholder="gpt-4-1106-preview"
-                />
-              </div>
-              <div>
-                <Label>Context Window</Label>
-                <Input
-                  type="number"
-                  value={newModel.context_window}
-                  onChange={(e) => setNewModel({ ...newModel, context_window: parseInt(e.target.value) })}
-                />
-              </div>
-              <div>
-                <Label>Max Tokens</Label>
-                <Input
-                  type="number"
-                  value={newModel.max_tokens}
-                  onChange={(e) => setNewModel({ ...newModel, max_tokens: parseInt(e.target.value) })}
-                />
-              </div>
-              <div className="col-span-2">
-                <Label>Description</Label>
-                <Input
-                  value={newModel.description}
-                  onChange={(e) => setNewModel({ ...newModel, description: e.target.value })}
-                  placeholder="Advanced model for complex tasks"
-                />
-              </div>
-              <div className="col-span-2">
-                <Button
-                  onClick={() => saveModel(newModel)}
-                  disabled={!newModel.name || !newModel.display_name || !newModel.provider || !newModel.model_id}
-                  className="w-full"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Model
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Existing Models */}
+      {/* Summary Cards */}
+      <div className="grid gap-4 md:grid-cols-4 mb-6">
         <Card>
-          <CardHeader>
-            <CardTitle>Existing Models ({models.length})</CardTitle>
-            <CardDescription>
-              Manage all AI models available in the system
-            </CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Models</CardTitle>
+            <Database className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {models.map((model) => (
-                <div key={model.id} className="border rounded-lg p-4">
-                  {editingModel?.id === model.id ? (
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label>Display Name</Label>
-                        <Input
-                          value={editingModel.display_name}
-                          onChange={(e) => setEditingModel({ ...editingModel, display_name: e.target.value })}
-                        />
-                      </div>
-                      <div>
-                        <Label>Model ID</Label>
-                        <Input
-                          value={editingModel.model_id}
-                          onChange={(e) => setEditingModel({ ...editingModel, model_id: e.target.value })}
-                        />
-                      </div>
-                      <div>
-                        <Label>Context Window</Label>
-                        <Input
-                          type="number"
-                          value={editingModel.context_window}
-                          onChange={(e) => setEditingModel({ ...editingModel, context_window: parseInt(e.target.value) })}
-                        />
-                      </div>
-                      <div>
-                        <Label>Max Tokens</Label>
-                        <Input
-                          type="number"
-                          value={editingModel.max_tokens}
-                          onChange={(e) => setEditingModel({ ...editingModel, max_tokens: parseInt(e.target.value) })}
-                        />
-                      </div>
-                      <div>
-                        <Label>Sort Order</Label>
-                        <Input
-                          type="number"
-                          value={editingModel.sort_order}
-                          onChange={(e) => setEditingModel({ ...editingModel, sort_order: parseInt(e.target.value) })}
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <Label>Description</Label>
-                        <Input
-                          value={editingModel.description}
-                          onChange={(e) => setEditingModel({ ...editingModel, description: e.target.value })}
-                        />
-                      </div>
-                      <div className="col-span-2 flex gap-2">
-                        <Button onClick={() => saveModel(editingModel)}>
-                          <Save className="h-4 w-4 mr-2" />
-                          Save
-                        </Button>
-                        <Button variant="outline" onClick={() => setEditingModel(null)}>
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3">
-                          <h3 className="font-semibold">{model.display_name}</h3>
-                          <span className="text-xs bg-gray-100 px-2 py-1 rounded">{model.name}</span>
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">{model.provider}</span>
-                          {!model.is_active && (
-                            <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">Inactive</span>
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-600 mt-1">{model.description}</p>
-                        <div className="flex gap-4 text-xs text-gray-500 mt-1">
-                          <span>Model ID: {model.model_id}</span>
-                          <span>Context: {model.context_window?.toLocaleString()}</span>
-                          <span>Max Tokens: {model.max_tokens?.toLocaleString()}</span>
-                          <span>Order: {model.sort_order}</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={model.is_active}
-                          onCheckedChange={(checked) => toggleModelStatus(model.id!, checked)}
-                        />
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setEditingModel(model)}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => deleteModel(model.id!)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+            <div className="text-2xl font-bold">{models.length}</div>
+            <p className="text-xs text-muted-foreground">
+              {models.filter(m => m.is_active).length} active
+            </p>
           </CardContent>
         </Card>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-4 gap-4 mt-6">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-2xl font-bold">{models.filter(m => m.is_active).length}</div>
-              <p className="text-xs text-gray-500">Active Models</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-2xl font-bold">{providers.length}</div>
-              <p className="text-xs text-gray-500">Providers</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-2xl font-bold">{models.filter(m => m.provider === 'openai').length}</div>
-              <p className="text-xs text-gray-500">OpenAI Models</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-2xl font-bold">{models.filter(m => m.provider === 'google').length}</div>
-              <p className="text-xs text-gray-500">Google Models</p>
-            </CardContent>
-          </Card>
-        </div>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Providers</CardTitle>
+            <Globe className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{providers.length}</div>
+            <p className="text-xs text-muted-foreground">
+              {providers.join(', ')}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Vision Models</CardTitle>
+            <Eye className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {models.filter(m => m.supports_vision).length}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Support image inputs
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Credit Range</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {Math.min(...models.map(m => m.message_credits || 1))}-{Math.max(...models.map(m => m.message_credits || 1))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Credits per message
+            </p>
+          </CardContent>
+        </Card>
       </div>
+
+      {/* Provider Tabs */}
+      <Tabs value={selectedProvider} onValueChange={setSelectedProvider}>
+        <TabsList className="mb-4">
+          <TabsTrigger value="all">All Models</TabsTrigger>
+          {providers.map(provider => (
+            <TabsTrigger key={provider} value={provider}>
+              <div className="flex items-center gap-2">
+                {getProviderIcon(provider)}
+                {provider.charAt(0).toUpperCase() + provider.slice(1)}
+              </div>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        <TabsContent value={selectedProvider}>
+          <Card>
+            <CardHeader>
+              <CardTitle>Model Configuration</CardTitle>
+              <CardDescription>
+                Click on any field to edit. Drag rows to reorder. Changes are saved automatically.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                >
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12"></TableHead>
+                        <TableHead className="w-[50px]">Active</TableHead>
+                        <TableHead>Model Code (API)</TableHead>
+                      <TableHead>Display Name</TableHead>
+                      <TableHead>Credits</TableHead>
+                      <TableHead>Input $/M</TableHead>
+                      <TableHead>Output $/M</TableHead>
+                      <TableHead>Speed</TableHead>
+                      <TableHead>Vision</TableHead>
+                      <TableHead>Functions</TableHead>
+                      <TableHead>Streaming</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Test</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <SortableContext
+                        items={filteredModels.map(m => m.id)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        {filteredModels.map((model) => (
+                          <SortableRow key={model.id} model={model}>
+                            <TableCell>
+                              <Switch
+                                checked={model.is_active}
+                                onCheckedChange={(checked) => toggleModel(model.id, checked)}
+                              />
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{renderEditableCell(model, 'model_id', model.model_id)}</TableCell>
+                            <TableCell>{renderEditableCell(model, 'display_name', model.display_name)}</TableCell>
+                            <TableCell>
+                              <div className={cn('inline-flex px-2 py-1 rounded text-sm font-semibold', getCreditBadgeColor(model.message_credits || 1))}>
+                                {renderEditableCell(model, 'message_credits', model.message_credits)}
+                              </div>
+                            </TableCell>
+                            <TableCell>{renderEditableCell(model, 'input_price_per_million', model.input_price_per_million)}</TableCell>
+                            <TableCell>{renderEditableCell(model, 'output_price_per_million', model.output_price_per_million)}</TableCell>
+                            <TableCell>{renderEditableCell(model, 'speed', model.speed)}</TableCell>
+                            <TableCell>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="p-1"
+                                onClick={() => toggleBooleanField(model.id, 'supports_vision', model.supports_vision)}
+                                title="Supports Vision"
+                              >
+                                {model.supports_vision ?
+                                  <Eye className="h-4 w-4 text-green-500" /> :
+                                  <EyeOff className="h-4 w-4 text-gray-400" />
+                                }
+                              </Button>
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="p-1"
+                                onClick={() => toggleBooleanField(model.id, 'supports_functions', model.supports_functions)}
+                                title="Supports Functions"
+                              >
+                                {model.supports_functions ?
+                                  <Settings className="h-4 w-4 text-green-500" /> :
+                                  <Settings className="h-4 w-4 text-gray-400" />
+                                }
+                              </Button>
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="p-1"
+                                onClick={() => toggleBooleanField(model.id, 'supports_streaming', model.supports_streaming)}
+                                title="Supports Streaming"
+                              >
+                                {model.supports_streaming ?
+                                  <Zap className="h-4 w-4 text-green-500" /> :
+                                  <Zap className="h-4 w-4 text-gray-400" />
+                                }
+                              </Button>
+                            </TableCell>
+                            <TableCell className="max-w-[300px]">{renderEditableCell(model, 'description', model.description)}</TableCell>
+                            <TableCell>
+                              <Button
+                                size="sm"
+                                variant={
+                                  model.last_test_status === 'success' ? 'outline' :
+                                  model.last_test_status === 'error' ? 'destructive' :
+                                  'ghost'
+                                }
+                                onClick={() => testModelConnection(model)}
+                                disabled={model.last_test_status === 'testing'}
+                                className="w-16"
+                                title={model.last_test_message || 'Click to test'}
+                              >
+                                {model.last_test_status === 'testing' ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : model.last_test_status === 'success' ? (
+                                  <CheckCircle className="h-4 w-4 text-green-500" />
+                                ) : model.last_test_status === 'error' ? (
+                                  <WifiOff className="h-4 w-4" />
+                                ) : (
+                                  <Wifi className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => duplicateModel(model)}
+                              title="Duplicate model"
+                            >
+                              <Copy className="h-4 w-4 text-blue-500" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => deleteModel(model.id)}
+                              title="Delete model"
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </SortableRow>
+                        ))}
+                      </SortableContext>
+                    </TableBody>
+                  </Table>
+                </DndContext>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   )
+}
+
+function cn(...classes: (string | boolean | undefined)[]) {
+  return classes.filter(Boolean).join(' ')
 }

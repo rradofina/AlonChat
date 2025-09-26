@@ -134,22 +134,98 @@ export class PlanService {
     return data || []
   }
 
+  /**
+   * DEPRECATED: This method name is confusing - use getProjectSubscriptionWithPlan instead
+   * Keeping for backward compatibility during migration
+   * @deprecated Use getProjectSubscriptionWithPlan
+   */
   async getUserSubscriptionWithPlan(userId: string): Promise<any> {
+    // WARNING: This was incorrectly comparing userId to project_id
+    // This would NEVER find matches since userId != projectId
+    // Keeping this temporarily for backward compatibility
+    // All callers should be updated to use proper methods below
+    console.warn('DEPRECATED: getUserSubscriptionWithPlan called with userId - this is incorrect!')
+
+    // Try to get user's default project and its subscription as a fallback
+    const defaultProject = await this.getUserDefaultProject(userId)
+    if (defaultProject) {
+      return this.getProjectSubscriptionWithPlan(defaultProject.id)
+    }
+
+    return null
+  }
+
+  /**
+   * Get subscription for a specific project
+   * This is the CORRECT way to get subscriptions since they're tied to projects
+   */
+  async getProjectSubscriptionWithPlan(projectId: string): Promise<any> {
     const { data, error } = await this.supabase
       .from('subscriptions')
       .select(`
         *,
         plan:plans(*)
       `)
-      .eq('user_id', userId)
+      .eq('project_id', projectId)
       .single()
 
     if (error) {
-      console.error('Error fetching user subscription:', error)
+      // Not an error - project might not have a subscription yet
+      if (error.code === 'PGRST116') {
+        console.log(`No subscription found for project ${projectId}`)
+      } else {
+        console.error('Error fetching project subscription:', error)
+      }
       return null
     }
 
     return data
+  }
+
+  /**
+   * Get user's default project (first created project)
+   * Used when we don't have explicit project context
+   */
+  async getUserDefaultProject(userId: string): Promise<any> {
+    const { data, error } = await this.supabase
+      .from('projects')
+      .select('*')
+      .eq('owner_id', userId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .single()
+
+    if (error) {
+      console.error('Error fetching user default project:', error)
+      return null
+    }
+
+    return data
+  }
+
+  /**
+   * Get all projects for a user with their subscriptions
+   * Useful for project switcher UI
+   */
+  async getUserProjectsWithSubscriptions(userId: string): Promise<any[]> {
+    const { data: projects, error } = await this.supabase
+      .from('projects')
+      .select(`
+        *,
+        subscription:subscriptions(
+          *,
+          plan:plans(*)
+        )
+      `)
+      .eq('owner_id', userId)
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.error('Error fetching user projects with subscriptions:', error)
+      return []
+    }
+
+    return projects || []
   }
 
   async getSubscriptionAddons(subscriptionId: string): Promise<any[]> {

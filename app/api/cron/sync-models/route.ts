@@ -28,38 +28,36 @@ export async function GET(request: Request) {
 
     const supabase = await createClient()
 
-    // Get all projects with API credentials
-    const { data: projectsWithCreds } = await supabase
-      .from('ai_provider_credentials')
-      .select('project_id')
-      .eq('is_active', true)
+    // Get all projects to sync models for
+    const { data: projects } = await supabase
+      .from('projects')
+      .select('id')
+      .limit(10) // Limit to avoid timeout
 
-    if (!projectsWithCreds || projectsWithCreds.length === 0) {
+    if (!projects || projects.length === 0) {
       return NextResponse.json({
-        message: 'No projects with API credentials found',
+        message: 'No projects found',
         synced: 0,
       })
     }
 
-    // Get unique project IDs
-    const uniqueProjectIds = [...new Set(projectsWithCreds.map(p => p.project_id))]
     const results = []
 
     // Sync models for each project
-    for (const projectId of uniqueProjectIds) {
+    for (const project of projects) {
       try {
-        const result = await syncDiscoveredModels(projectId)
+        const synced = await syncDiscoveredModels(project.id)
         results.push({
-          projectId,
-          success: result.success,
-          modelsCount: result.modelsCount,
+          projectId: project.id,
+          success: true,
+          modelsAdded: synced,
         })
       } catch (error) {
-        console.error(`Failed to sync models for project ${projectId}:`, error)
+        console.error(`Error syncing models for project ${project.id}:`, error)
         results.push({
-          projectId,
+          projectId: project.id,
           success: false,
-          error: String(error),
+          error: error instanceof Error ? error.message : 'Unknown error',
         })
       }
     }
@@ -68,37 +66,22 @@ export async function GET(request: Request) {
     await supabase
       .from('system_logs')
       .insert({
-        type: 'model_sync',
-        data: {
-          projects_synced: results.filter(r => r.success).length,
-          total_models: results.reduce((acc, r) => acc + (r.modelsCount || 0), 0),
-          results,
-        },
-        created_at: new Date().toISOString(),
+        level: 'info',
+        message: 'Model sync cron job completed',
+        data: { results },
       })
-      .catch(console.error) // Don't fail if logging fails
-
-    const successCount = results.filter(r => r.success).length
-    const totalModels = results.reduce((acc, r) => acc + (r.modelsCount || 0), 0)
+      .catch(e => console.error('Failed to log sync operation:', e))
 
     return NextResponse.json({
-      success: true,
-      message: `Synced ${totalModels} models across ${successCount} projects`,
-      projectsSynced: successCount,
-      totalModels,
+      message: 'Model sync completed',
+      projects: results.length,
       results,
-      timestamp: new Date().toISOString(),
     })
   } catch (error) {
-    console.error('Cron job error:', error)
+    console.error('Model sync cron error:', error)
     return NextResponse.json(
-      { error: 'Failed to sync models', details: error },
+      { error: 'Internal server error' },
       { status: 500 }
     )
   }
-}
-
-// Allow POST for manual triggers
-export async function POST(request: Request) {
-  return GET(request)
 }

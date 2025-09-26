@@ -4,56 +4,25 @@ import { GoogleProvider } from './providers/google'
 import { AIProvider, ChatMessage, ChatCompletionOptions } from './providers/base'
 
 export async function getConfiguredProvider(projectId: string, providerName: string): Promise<AIProvider | null> {
-  const supabase = await createClient()
-
-  const { data: credential } = await supabase
-    .from('ai_provider_credentials')
-    .select(`
-      credentials,
-      ai_providers!inner(name, provider_class)
-    `)
-    .eq('project_id', projectId)
-    .eq('ai_providers.name', providerName)
-    .single()
-
-  if (!credential || !credential.credentials) {
-    return null
-  }
-
-  // Extract the API key based on provider - handle different credential formats
-  let apiKey: string | undefined
-
-  switch (providerName) {
-    case 'openai':
-      apiKey = credential.credentials.OPENAI_API_KEY || credential.credentials.api_key
-      break
-    case 'google':
-      apiKey = credential.credentials.GEMINI_API_KEY || credential.credentials.api_key
-      break
-    case 'anthropic':
-      apiKey = credential.credentials.ANTHROPIC_API_KEY || credential.credentials.api_key
-      break
-    default:
-      apiKey = credential.credentials.api_key || credential.credentials.API_KEY
-  }
-
-  if (!apiKey) {
-    return null
-  }
-
+  // Simply create provider using environment variables
   let provider: AIProvider | null = null
 
   switch (providerName) {
     case 'openai':
       provider = new OpenAIProvider()
-      await provider.initialize({ apiKey })
+      await provider.initialize({}) // Will use OPENAI_API_KEY from env
       break
     case 'google':
       provider = new GoogleProvider()
-      await provider.initialize({ apiKey })
+      await provider.initialize({}) // Will use GEMINI_API_KEY from env
       break
     default:
       return null
+  }
+
+  // Check if provider was successfully configured
+  if (!provider.isConfigured()) {
+    return null
   }
 
   return provider
@@ -80,20 +49,7 @@ export async function chatWithProjectCredentials(
   const provider = await getConfiguredProvider(projectId, models.provider)
 
   if (!provider || !provider.isConfigured()) {
-    const { data: hasCredentials } = await supabase
-      .from('ai_provider_credentials')
-      .select(`
-        id,
-        ai_providers!inner(name)
-      `)
-      .eq('project_id', projectId)
-      .eq('ai_providers.name', models.provider)
-      .single()
-
-    if (!hasCredentials) {
-      throw new Error(`No API key configured for ${models.provider}. Please add your API key in Settings > API Keys.`)
-    }
-    throw new Error(`Provider ${models.provider} failed to initialize. Please check your API key.`)
+    throw new Error(`Provider ${models.provider} not configured. Please ensure API keys are set in environment variables.`)
   }
 
   const result = await provider.chat({

@@ -1,5 +1,8 @@
 # AlonChat Development Progress Documentation
 
+> ⚠️ **HISTORICAL DOCUMENT** - This file contains outdated references to "workspaces" terminology.
+> The project now uses "projects" instead. See [CURRENT_ARCHITECTURE.md](./CURRENT_ARCHITECTURE.md) for the current structure.
+
 **Date:** September 22, 2025
 **Session Summary:** Built initial MVP of AlonChat - a Chatbase-inspired AI chatbot builder for Philippine SMEs
 

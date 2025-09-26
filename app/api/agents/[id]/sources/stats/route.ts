@@ -10,10 +10,11 @@ export async function GET(
   try {
     const supabase = await createClient()
 
-    // Get the agent's project and user to fetch plan info
+    // Get the agent's project to fetch plan info
+    // FIXED: We only need project_id, not owner_id since subscriptions are project-based
     const { data: agent, error: agentError } = await supabase
       .from('agents')
-      .select('project_id, projects!inner(owner_id)')
+      .select('project_id')  // Only need project_id now
       .eq('id', params.id)
       .single()
 
@@ -29,9 +30,10 @@ export async function GET(
       })
     }
 
-    // Get user's subscription and plan
+    // Get PROJECT's subscription and plan (not user's!)
+    // FIXED: Use project_id directly since subscriptions are tied to projects
     const planService = new PlanService(supabase)
-    const subscription = await planService.getUserSubscriptionWithPlan(agent.projects.owner_id)
+    const subscription = await planService.getProjectSubscriptionWithPlan(agent.project_id)
     const storageLimitKb = subscription?.plan
       ? subscription.plan.storage_limit_mb * 1024
       : 30 * 1024 // Default 30MB

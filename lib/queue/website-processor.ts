@@ -1,51 +1,18 @@
 import { Queue, Worker, Job } from 'bullmq'
-import IORedis from 'ioredis'
 import { createClient } from '@/lib/supabase/server'
-import { scrapeWebsite } from '@/lib/sources/website-scraper'
+import { UnifiedCrawler } from '@/lib/crawler/unified-crawler'
 import { ChunkManager } from '@/lib/services/chunk-manager'
-
-export interface WebsiteCrawlJob {
-  sourceId: string
-  agentId: string
-  projectId: string
-  url: string
-  crawlSubpages: boolean
-  maxPages: number
-}
+import { getSharedConnection, getWorkerConnection } from './redis-connection'
+import { WebsiteCrawlJob } from '@/lib/types/crawler'
 
 let websiteQueue: Queue<WebsiteCrawlJob> | null = null
 let websiteWorker: Worker<WebsiteCrawlJob> | null = null
 
-// Initialize Redis connection
-function getRedisConnection() {
-  try {
-    const redis = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
-      maxRetriesPerRequest: 3,
-      retryStrategy(times) {
-        if (times > 3) {
-          console.error('Redis connection failed after 3 retries')
-          return null
-        }
-        const delay = Math.min(times * 500, 2000)
-        return delay
-      }
-    })
-
-    redis.on('error', (error) => {
-      console.error('Redis connection error:', error)
-    })
-
-    return redis
-  } catch (error) {
-    console.error('Failed to create Redis connection:', error)
-    return null
-  }
-}
 
 // Initialize queue
 export function initWebsiteQueue() {
   try {
-    const connection = getRedisConnection()
+    const connection = getSharedConnection()
     if (!connection) {
       console.warn('Redis not available, website crawling will not work')
       return null
@@ -74,7 +41,7 @@ export function initWebsiteQueue() {
 // Initialize worker
 export function initWebsiteWorker() {
   try {
-    const connection = getRedisConnection()
+    const connection = getWorkerConnection()
     if (!connection) {
       console.warn('Redis not available, website worker will not start')
       return null
@@ -87,7 +54,11 @@ export function initWebsiteWorker() {
       },
       {
         connection,
-        concurrency: 2 // Process 2 crawls simultaneously
+        concurrency: 2, // Process 2 crawls simultaneously
+        limiter: {
+          max: 10,
+          duration: 1000, // Max 10 jobs per second
+        }
       }
     )
 
@@ -106,7 +77,7 @@ export function initWebsiteWorker() {
   }
 }
 
-// Process website crawl job
+// Process website crawl job using the new UnifiedCrawler
 async function processWebsiteCrawl(job: Job<WebsiteCrawlJob>) {
   const { sourceId, agentId, projectId, url, crawlSubpages, maxPages } = job.data
   const supabase = await createClient()
@@ -121,65 +92,87 @@ async function processWebsiteCrawl(job: Job<WebsiteCrawlJob>) {
       })
       .eq('id', sourceId)
 
-    // Report progress
+    // Report initial progress
     await job.updateProgress(10)
 
-    // Crawl website
-    console.log(`Starting crawl for ${url}`)
-    const crawlResults = await scrapeWebsite(url, maxPages, crawlSubpages)
+    // Clear existing chunks before starting
+    await ChunkManager.deleteChunks(sourceId)
+    console.log(`[WebsiteProcessor] Cleared existing chunks for ${sourceId}`)
 
-    await job.updateProgress(50)
+    // Initialize UnifiedCrawler with all features
+    const crawler = new UnifiedCrawler({
+      maxPages,
+      crawlSubpages,
+      sourceId,
+      agentId,
+      projectId,
+      useCache: true, // Enable caching
+      onProgress: async (progress) => {
+        // Update job progress
+        const progressPercent = Math.floor((progress.current / progress.total) * 80) + 10
+        await job.updateProgress(progressPercent)
 
-    // Track initial crawl results
+        // Update source metadata
+        const { data: source } = await supabase
+          .from('sources')
+          .select('metadata')
+          .eq('id', sourceId)
+          .single()
+
+        await supabase
+          .from('sources')
+          .update({
+            metadata: {
+              ...source?.metadata,
+              pages_crawled: progress.current,
+              crawl_progress: {
+                current: progress.current,
+                total: progress.total,
+                currentUrl: progress.currentUrl,
+                phase: progress.phase || 'processing'
+              },
+              discovered_links: progress.discoveredLinks || []
+            }
+          })
+          .eq('id', sourceId)
+
+        console.log(`[WebsiteProcessor] Progress: ${progress.current}/${progress.total} - ${progress.phase}`)
+      }
+    })
+
+    // Crawl the website
+    console.log(`[WebsiteProcessor] Starting crawl for ${url} with UnifiedCrawler`)
+    const crawlResults = await crawler.crawlWebsite(url)
+
+    await job.updateProgress(90)
+
+    // Calculate totals
+    const validPages = crawlResults.filter(r => !r.error && r.content)
+    const totalContent = validPages.reduce((sum, page) => sum + page.content.length, 0)
+    const sizeKb = Math.ceil(totalContent / 1024)
+
+    // Get chunk count from database
+    const { data: chunks } = await supabase
+      .from('source_chunks')
+      .select('id')
+      .eq('source_id', sourceId)
+
+    const totalChunks = chunks?.length || 0
+
+    // Collect crawl metadata
     const crawledPages = crawlResults.filter(r => !r.error).map(r => r.url)
     const crawlErrors = crawlResults.filter(r => r.error).map(r => ({
       url: r.url,
       error: r.error
     }))
 
-    // Process and chunk content
-    const validPages = crawlResults.filter(r => !r.error && r.content)
-    if (validPages.length === 0) {
-      throw new Error('No valid pages found to process')
-    }
-
-    console.log(`Processing ${validPages.length} pages`)
-
-    // Process each page separately to maintain page boundaries
-    let totalChunks = 0
-    let totalSize = 0
-
-    for (const page of validPages) {
-      // Store chunks for each page with page-specific metadata
-      const chunkCount = await ChunkManager.storeChunks({
-        sourceId,
-        agentId,
-        projectId,
-        content: page.content || '',
-        metadata: {
-          type: 'website',
-          page_url: page.url,
-          page_title: page.title || page.url,
-          root_url: url,
-          crawl_timestamp: new Date().toISOString(),
-          // Add link depth if available
-          depth: page.url === url ? 0 : page.url.split('/').length - url.split('/').length
-        },
-        chunkSize: 4000, // Larger chunks for websites
-        chunkOverlap: 400 // Maintain overlap for context
-      })
-
-      totalChunks += chunkCount
-      totalSize += (page.content || '').length
-      console.log(`Chunked page ${page.url}: ${chunkCount} chunks`)
-
-      // Update progress for each page
-      const pageProgress = 80 + Math.floor((20 * validPages.indexOf(page)) / validPages.length)
-      await job.updateProgress(pageProgress)
-    }
-
-    // Calculate size in KB
-    const sizeKb = Math.ceil(totalSize / 1024)
+    const allDiscoveredLinks = new Set<string>()
+    crawlResults.forEach(result => {
+      if (result.links && result.links.length > 0) {
+        result.links.forEach(link => allDiscoveredLinks.add(link))
+      }
+    })
+    const discoveredLinks = Array.from(allDiscoveredLinks)
 
     // Update source status to ready with all metadata
     await supabase
@@ -195,6 +188,7 @@ async function processWebsiteCrawl(job: Job<WebsiteCrawlJob>) {
           max_pages: maxPages,
           pages_crawled: validPages.length,
           crawled_pages: validPages.map(p => p.url),
+          discovered_links: discoveredLinks,
           crawl_errors: crawlErrors,
           total_chunks: totalChunks,
           crawl_completed_at: new Date().toISOString()
@@ -272,4 +266,43 @@ export function startWebsiteWorker() {
   if (!websiteWorker) {
     initWebsiteWorker()
   }
+}
+
+// Get queue status with positions
+export async function getQueueStatus(): Promise<any> {
+  if (!websiteQueue) return { isAvailable: false }
+
+  try {
+    const waiting = await websiteQueue.getWaitingCount()
+    const active = await websiteQueue.getActiveCount()
+    const completed = await websiteQueue.getCompletedCount()
+    const failed = await websiteQueue.getFailedCount()
+
+    // Get waiting jobs with their positions
+    const waitingJobs = await websiteQueue.getWaiting(0, 100)
+    const jobPositions: Record<string, number> = {}
+
+    waitingJobs.forEach((job, index) => {
+      if (job.data.sourceId) {
+        jobPositions[job.data.sourceId] = index + 1
+      }
+    })
+
+    return {
+      waiting,
+      active,
+      completed,
+      failed,
+      jobPositions,
+      isAvailable: true
+    }
+  } catch (error) {
+    console.error('Failed to get queue status:', error)
+    return { isAvailable: false }
+  }
+}
+
+// Check if queue is available
+export function isQueueAvailable(): boolean {
+  return websiteQueue !== null
 }

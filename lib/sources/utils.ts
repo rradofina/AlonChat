@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { planService } from '@/lib/plans/plan-service'
+import { PlanService } from '@/lib/plans/plan-service'
 
 export interface SourceStats {
   totalSources: number
@@ -64,10 +64,11 @@ export async function calculateStorageUsage(
 ): Promise<{ used: number; limit: number; percentage: number }> {
   const supabase = await createClient()
 
-  // Get user from project
+  // Get project details to verify it exists
+  // NOTE: We don't need owner_id anymore since subscription is tied to project
   const { data: project } = await supabase
     .from('projects')
-    .select('user_id')
+    .select('id')  // Just check project exists
     .eq('id', projectId)
     .single()
 
@@ -75,8 +76,10 @@ export async function calculateStorageUsage(
     return { used: 0, limit: 0, percentage: 0 }
   }
 
-  // Get user's subscription with plan details
-  const subscription = await planService.getUserSubscriptionWithPlan(project.user_id)
+  // Get PROJECT's subscription with plan details (not user's!)
+  // FIXED: Subscriptions are tied to projects, not users
+  const planService = new PlanService(supabase)
+  const subscription = await planService.getProjectSubscriptionWithPlan(projectId)
 
   // Default to starter plan if no subscription
   const limit = subscription?.plan
@@ -106,8 +109,16 @@ export async function calculateStorageUsage(
   return { used, limit, percentage }
 }
 
-export async function getStorageLimit(userId: string): Promise<number> {
-  const subscription = await planService.getUserSubscriptionWithPlan(userId)
+/**
+ * Get storage limit for a PROJECT (not user!)
+ * @deprecated Use calculateStorageUsage which returns limit as well
+ */
+export async function getStorageLimit(projectId: string): Promise<number> {
+  // FIXED: This should use projectId, not userId
+  // TODO: All callers should be updated to pass projectId
+  const supabase = await createClient()
+  const planService = new PlanService(supabase)
+  const subscription = await planService.getProjectSubscriptionWithPlan(projectId)
 
   if (subscription?.plan) {
     return planService.getStorageLimitBytes(subscription.plan)
@@ -148,8 +159,8 @@ export async function validateSourceAccess(
   sourceId: string,
   userId: string
 ): Promise<boolean> {
-  const supabase = createClient()
-  
+  const supabase = await createClient()
+
   const { data } = await supabase
     .from('agent_sources')
     .select(`
@@ -158,14 +169,15 @@ export async function validateSourceAccess(
         id,
         project:projects!inner(
           id,
-          user_id
+          owner_id  // FIXED: Changed from user_id to owner_id
         )
       )
     `)
     .eq('id', sourceId)
     .single()
 
-  return data?.agent?.project?.user_id === userId
+  // FIXED: Compare with owner_id, not user_id
+  return data?.agent?.project?.owner_id === userId
 }
 
 export function getSourceTypeLabel(type: string): string {

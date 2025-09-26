@@ -83,8 +83,22 @@ export async function POST(
       maxPages: maxPages || 10
     })
 
-    // If queue is not available, process directly (fallback)
-    if (!jobId) {
+    // If queue is available, update status to queued
+    if (jobId) {
+      console.log(`Website queued with job ID: ${jobId}`)
+
+      await supabase
+        .from('sources')
+        .update({
+          status: 'queued',
+          metadata: {
+            ...source.metadata,
+            job_id: jobId
+          }
+        })
+        .eq('id', source.id)
+    } else {
+      // If queue is not available, process directly (fallback)
       console.log('Queue not available, processing website directly')
 
       // Update status to processing

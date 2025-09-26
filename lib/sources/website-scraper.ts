@@ -1,29 +1,6 @@
 import * as cheerio from 'cheerio'
-import { scrapeWebsiteWithPlaywright } from './playwright-scraper'
-
-export interface CrawlResult {
-  url: string
-  title: string
-  content: string
-  links: string[]
-  images: string[]
-  error?: string
-}
-
-export interface CrawlProgress {
-  current: number
-  total: number
-  currentUrl: string
-  phase: 'discovering' | 'processing'
-  discoveredLinks?: string[]
-}
-
-export interface CrawlOptions {
-  maxPages?: number
-  crawlSubpages?: boolean
-  fullPageContent?: boolean
-  onProgress?: (progress: CrawlProgress) => void | Promise<void>
-}
+import { scrapeWebsiteWithPlaywrightPooled } from './playwright-scraper-pooled'
+import { CrawlResult, CrawlProgress, CrawlOptions } from '@/lib/types/crawler'
 
 export class WebsiteScraper {
   private maxPages: number
@@ -104,6 +81,18 @@ export class WebsiteScraper {
 
       // Add discovered links to our set
       result.links.forEach(link => this.discoveredLinks.add(link))
+
+      // Report completed page in progress callback for progressive processing
+      if (this.onProgress) {
+        await this.onProgress({
+          current: results.length,
+          total: this.maxPages,
+          currentUrl: result.url,
+          phase: 'processing',
+          discoveredLinks: Array.from(this.discoveredLinks),
+          completedPage: result  // Pass the completed page for immediate processing
+        })
+      }
 
       // Add subpages to queue if enabled
       if (this.crawlSubpages && !result.error) {
@@ -229,7 +218,7 @@ export class WebsiteScraper {
       return {
         url,
         title,
-        content: content.slice(0, 50000), // Limit content size
+        content: content, // Don't limit content here - let chunking handle it
         links: [...new Set(links)], // Remove duplicates
         images: [...new Set(images)]
       }
@@ -337,30 +326,40 @@ export async function scrapeWebsite(
   onProgress?: (progress: CrawlProgress) => void | Promise<void>,
   fullPageContent: boolean = false
 ): Promise<CrawlResult[]> {
-  try {
-    // Try Playwright first for better success rate
-    console.log('Attempting to crawl with Playwright...')
-    const results = await scrapeWebsiteWithPlaywright(url, maxPages, crawlSubpages, onProgress as any, fullPageContent)
-
-    // If Playwright got results, return them
-    const validResults = results.filter(r => !r.error || r.content)
-    if (validResults.length > 0) {
-      console.log(`Playwright succeeded: ${validResults.length} pages crawled`)
-      return results
-    }
-
-    // If Playwright failed completely, fall back to fetch
-    console.log('Playwright failed, falling back to fetch-based crawler...')
-  } catch (error: any) {
-    console.log('Playwright error, falling back to fetch:', error.message)
-  }
-
-  // Fall back to fetch-based scraper
+  // Try HTTP fetch first (faster and lighter)
+  console.log('Attempting HTTP-based crawl...')
   const scraper = new WebsiteScraper({
     maxPages,
     crawlSubpages,
     fullPageContent,
     onProgress
   })
-  return scraper.crawlWebsite(url)
+
+  const results = await scraper.crawlWebsite(url)
+
+  // Check if we got meaningful content
+  const validResults = results.filter(r => !r.error && r.content && r.content.length > 500)
+
+  if (validResults.length > 0) {
+    console.log(`HTTP crawl succeeded: ${validResults.length} pages with content`)
+    return results
+  }
+
+  // If HTTP failed or got minimal content, try Playwright for JS-heavy sites
+  console.log('HTTP crawl got minimal content, trying Playwright for JS rendering...')
+  try {
+    const playwrightResults = await scrapeWebsiteWithPlaywrightPooled(url, maxPages, crawlSubpages, onProgress, fullPageContent)
+    const validPlaywrightResults = playwrightResults.filter(r => !r.error || r.content)
+
+    if (validPlaywrightResults.length > 0) {
+      console.log(`Playwright succeeded: ${validPlaywrightResults.length} pages crawled`)
+      return playwrightResults
+    }
+  } catch (error: any) {
+    console.log('Playwright also failed:', error.message)
+  }
+
+  // Return whatever we got from HTTP even if minimal
+  console.log('Returning HTTP results (may be limited)')
+  return results
 }

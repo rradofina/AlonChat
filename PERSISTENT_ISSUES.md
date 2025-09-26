@@ -10,6 +10,86 @@ This file tracks persistent issues that occur multiple times during development,
 
 ---
 
+## CRITICAL ARCHITECTURAL ISSUE: Project-Based vs User-Based Subscriptions
+
+### Date Discovered: January 2025
+### Status: ✅ FULLY RESOLVED (January 27, 2025)
+
+### The Problem (FIXED)
+The entire codebase had a **fundamental mismatch** between the database design and the code implementation:
+
+- **DATABASE DESIGN**: Subscriptions are tied to PROJECTS (correct)
+  - `subscriptions` table has `project_id` column
+  - `projects` table has `owner_id` (references user)
+  - Relationship: User → owns Project → has Subscription
+
+- **CODE IMPLEMENTATION**: Code assumes subscriptions are tied to USERS (incorrect!)
+  - `getUserSubscriptionWithPlan(userId)` tries to find subscription by user ID
+  - Code references `project.user_id` but column is actually `project.owner_id`
+  - API routes don't know which project context they're in
+
+### Why This Matters
+- Each project should have its own subscription (like Vercel, Supabase)
+- Users can have multiple projects with different plans
+- Current code will NEVER find subscriptions because it's comparing user IDs to project IDs
+
+### Files Being Fixed (Track Changes Here)
+```typescript
+// ✅ CHANGE #1: lib/plans/plan-service.ts
+// OLD: getUserSubscriptionWithPlan(userId) queries .eq('project_id', userId)
+// NEW: getProjectSubscriptionWithPlan(projectId) queries .eq('project_id', projectId)
+// ALSO ADDED: getUserDefaultProject(userId) to get user's default project
+// ALSO ADDED: getUserProjectsWithSubscriptions(userId) for project switcher
+
+// ✅ CHANGE #2: lib/sources/utils.ts
+// OLD: project.user_id (doesn't exist!)
+// NEW: project.owner_id (correct column name)
+// FIXED: calculateStorageUsage now uses project subscription
+// FIXED: getStorageLimit now takes projectId (was userId)
+// FIXED: validateSourceAccess uses owner_id
+
+// ✅ CHANGE #3: app/api/user/plan/route.ts
+// OLD: Gets subscription by user.id directly
+// NEW: Gets user's default project first, then project's subscription
+// RETURNS: Now includes project info in response
+
+// ✅ CHANGE #4: app/api/agents/[id]/sources/stats/route.ts
+// OLD: Passes agent.projects.owner_id to getUserSubscriptionWithPlan
+// NEW: Passes agent.project_id to getProjectSubscriptionWithPlan
+// SIMPLIFIED: Only queries project_id now
+
+// ✅ CHANGE #5: Added project context tracking (lib/projects/project-context.ts)
+// NEW: getCurrentProjectId() - gets from cookie or default
+// NEW: setCurrentProjectId() - stores in cookie
+// NEW: switchProject() - validates and switches context
+// NEW: getUserProjects() - for project switcher UI
+```
+
+### Resolution Summary (January 27, 2025)
+✅ **ALL ISSUES FIXED:**
+1. **Fixed billing page** - Now updates subscriptions table instead of projects
+2. **Fixed plans page** - Reads from subscriptions table with plan joins
+3. **Fixed onboarding** - Creates free subscription when project is created
+4. **Consolidated billing columns** - All billing data now in subscriptions table
+5. **Renamed FK constraints** - Changed from workspace_id_fkey to project_id_fkey
+6. **Removed duplicate columns** - Cleaned up projects table
+
+### Testing Completed
+- ✅ User can see their project's subscription plan
+- ✅ Storage limits work correctly per project
+- ✅ Agent stats show correct storage limits
+- ✅ Multiple projects can have different plans
+- ✅ All projects have subscriptions
+- ✅ Server runs without errors
+
+### Rollback Instructions
+If this breaks things:
+1. Git revert to before these changes
+2. The old broken code at least doesn't crash (just returns null subscriptions)
+3. Users default to starter plan limits
+
+---
+
 ## Issue #1: Port 3000 Already in Use
 
 ### Symptoms

@@ -1,5 +1,6 @@
 -- Clean up duplicate workspaces keeping only the first one per user
 -- This migration removes duplicates created during the redirect loop bug
+-- NOTE: This operates on the legacy 'workspaces' table which has been replaced by 'projects'
 
 -- First, identify and keep only the oldest workspace per user
 WITH duplicates AS (

@@ -11,6 +11,8 @@ CREATE TYPE source_type AS ENUM ('website', 'file', 'text', 'qa', 'fb_export');
 CREATE TYPE message_role AS ENUM ('user', 'assistant', 'system');
 
 -- Workspaces table (multi-tenant)
+-- NOTE: This table has been superseded by 'projects' table in later migrations
+-- Kept for historical migration compatibility
 CREATE TABLE workspaces (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name TEXT NOT NULL,

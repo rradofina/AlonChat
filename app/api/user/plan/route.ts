@@ -17,15 +17,32 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Get user's subscription with plan details
-    const subscription = await planService.getUserSubscriptionWithPlan(user.id)
+    // FIXED: Get user's default project first
+    // TODO: In the future, support project switching via query param or header
+    const userProject = await planService.getUserDefaultProject(user.id)
+
+    if (!userProject) {
+      // User has no projects - shouldn't happen but handle gracefully
+      return NextResponse.json({
+        plan: await planService.getPlanByName('starter'),
+        subscription: null,
+        project: null
+      })
+    }
+
+    // Get PROJECT's subscription with plan details (not user's!)
+    const subscription = await planService.getProjectSubscriptionWithPlan(userProject.id)
 
     if (!subscription?.plan) {
       // Return default starter plan if no subscription
       const starterPlan = await planService.getPlanByName('starter')
       return NextResponse.json({
         plan: starterPlan,
-        subscription: null
+        subscription: null,
+        project: {
+          id: userProject.id,
+          name: userProject.name
+        }
       })
     }
 
@@ -40,6 +57,10 @@ export async function GET(request: NextRequest) {
         current_period_end: subscription.current_period_end,
         cancel_at: subscription.cancel_at,
         canceled_at: subscription.canceled_at
+      },
+      project: {
+        id: userProject.id,
+        name: userProject.name
       },
       addons
     })

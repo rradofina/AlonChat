@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { scrapeWebsite } from '@/lib/sources/website-scraper'
+import { scrapeWebsiteWithPlaywright } from '@/lib/sources/playwright-scraper'
 import { ChunkManager } from '@/lib/services/chunk-manager'
 
 export async function POST(
@@ -46,9 +46,10 @@ export async function POST(
     const url = source.website_url || source.metadata?.url
     const crawlSubpages = source.metadata?.crawl_subpages !== false  // Default to true for re-crawl
     const maxPages = source.metadata?.max_pages || 200  // Use default of 200 for re-crawl
+    const fullPageContent = source.metadata?.full_page_content || false // Use full page mode if enabled
 
     // Start crawling
-    processWebsiteAsync(params.sourceId, params.id, source.project_id, url, crawlSubpages, maxPages)
+    processWebsiteAsync(params.sourceId, params.id, source.project_id, url, crawlSubpages, maxPages, fullPageContent)
 
     return NextResponse.json({
       success: true,
@@ -71,12 +72,13 @@ async function processWebsiteAsync(
   projectId: string,
   url: string,
   crawlSubpages: boolean,
-  maxPages: number
+  maxPages: number,
+  fullPageContent: boolean
 ) {
   const supabase = await createClient()
 
   try {
-    console.log(`Starting re-crawl for ${url} with maxPages=${maxPages}, crawlSubpages=${crawlSubpages}`)
+    console.log(`Starting re-crawl for ${url} with maxPages=${maxPages}, crawlSubpages=${crawlSubpages}, fullPageContent=${fullPageContent}`)
 
     // Set for discovered links
     const discoveredLinks = new Set<string>()
@@ -93,6 +95,7 @@ async function processWebsiteAsync(
           url,
           crawl_subpages: crawlSubpages,
           max_pages: maxPages,
+          full_page_content: fullPageContent,
           crawl_progress: {
             current: progress.current,
             total: progress.total,
@@ -104,8 +107,8 @@ async function processWebsiteAsync(
       }).eq('id', sourceId)
     }
 
-    // Crawl the website with progress tracking
-    const results = await scrapeWebsite(url, maxPages, crawlSubpages, progressCallback)
+    // Crawl the website with progress tracking using Playwright
+    const results = await scrapeWebsiteWithPlaywright(url, maxPages, crawlSubpages, progressCallback, fullPageContent)
     const validPages = results.filter(page => !page.error && page.content)
 
     if (validPages.length === 0) {
@@ -119,6 +122,7 @@ async function processWebsiteAsync(
           url,
           crawl_subpages: crawlSubpages,
           max_pages: maxPages,
+          full_page_content: fullPageContent,
           pages_crawled: attemptedUrls.length,
           crawled_pages: attemptedUrls,
           crawl_errors: results.filter(r => r.error).map(r => ({
@@ -145,16 +149,16 @@ async function processWebsiteAsync(
 
       // Create chunks for the page content
       const chunkManager = new ChunkManager(supabase)
-      const chunks = await chunkManager.createChunksForSource({
+      const chunks = await chunkManager.createChunks(
         sourceId,
-        content: pageContent,
-        metadata: {
+        pageContent,
+        {
           url: page.url,
           title: page.title,
           links: page.links,
           images: page.images
         }
-      })
+      )
 
       totalChunks += chunks.length
     }
@@ -168,6 +172,7 @@ async function processWebsiteAsync(
         url,
         crawl_subpages: crawlSubpages,
         max_pages: maxPages,
+        full_page_content: fullPageContent,
         pages_crawled: validPages.length,
         crawled_pages: validPages.map(p => p.url),
         discovered_links: Array.from(discoveredLinks),

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { AlertCircle, Globe, Trash2, X, ChevronRight, ChevronDown, MoreHorizontal, Edit, RefreshCw, Loader2, Info, Lock, AlertTriangle } from 'lucide-react'
+import { AlertCircle, Globe, Trash2, X, ChevronRight, ChevronDown, MoreHorizontal, Edit, RefreshCw, Loader2, Info, Lock, AlertTriangle, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useParams } from 'next/navigation'
@@ -88,6 +88,11 @@ export default function WebsitePage() {
     onConfirm: () => void
   }>({ isOpen: false, sourceIds: [], onConfirm: () => {} })
 
+  // Track recently deleted items to prevent race condition with auto-refresh
+  // When an item is deleted, it's added here and filtered from all API responses
+  // This prevents deleted items from reappearing due to stale database reads
+  const [recentlyDeleted, setRecentlyDeleted] = useState<Set<string>>(new Set())
+
   const handleUrlChange = (value: string) => {
     // Remove any protocol if user types it in the input
     const cleanedValue = value.replace(/^https?:\/\//i, '')
@@ -101,27 +106,53 @@ export default function WebsitePage() {
   useEffect(() => {
     fetchWebsiteSources()
     fetchAgentStatus()
+    // Initialize queue system
+    fetch('/api/init')
+      .then(res => res.json())
+      .then(data => console.log('Queue system:', data))
+      .catch(err => console.error('Failed to initialize queue:', err))
   }, [])
 
   // Auto-refresh for crawling status
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
+        // Fetch sources
         const response = await fetch(`/api/agents/${params.id}/sources/website`)
         if (response.ok) {
           const data = await response.json()
           const currentSources = data.sources || []
 
-          // Only update if there are pending/processing websites
+          // Fetch queue status if any sources are queued
+          const hasQueuedSources = currentSources.some((s: any) => s.status === 'queued')
+          if (hasQueuedSources) {
+            const queueResponse = await fetch('/api/queue/status')
+            if (queueResponse.ok) {
+              const queueData = await queueResponse.json()
+              if (queueData.available && queueData.jobPositions) {
+                // Add queue positions to sources
+                currentSources.forEach((source: any) => {
+                  if (source.status === 'queued' && queueData.jobPositions[source.id]) {
+                    source.queue_position = queueData.jobPositions[source.id]
+                  }
+                })
+              }
+            }
+          }
+
+          // Only update if there are pending/processing/queued websites
           const hasCrawlingWebsites = currentSources.some((s: any) =>
-            s.status === 'pending' || s.status === 'processing'
+            s.status === 'pending' || s.status === 'processing' || s.status === 'queued'
           )
 
+          // Filter out recently deleted items before updating
+          const filteredSources = currentSources.filter((s: any) => !recentlyDeleted.has(s.id))
+
           if (hasCrawlingWebsites) {
-            setSources(currentSources)
-          } else if (sources.some(s => s.status === 'pending' || s.status === 'processing')) {
+            setSources(filteredSources)
+          } else if (sources.some(s => s.status === 'pending' || s.status === 'processing' || s.status === 'queued')) {
             // Final update when all crawling is done
-            setSources(currentSources)
+            setSources(filteredSources)
           }
         }
       } catch (error) {
@@ -130,7 +161,7 @@ export default function WebsitePage() {
     }, 3000) // Check every 3 seconds
 
     return () => clearInterval(interval)
-  }, [params.id, sources])
+  }, [params.id, sources, recentlyDeleted])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -155,7 +186,9 @@ export default function WebsitePage() {
       const response = await fetch(`/api/agents/${params.id}/sources/website`)
       if (response.ok) {
         const data = await response.json()
-        setSources(data.sources || [])
+        // Filter out recently deleted items
+        const filteredSources = (data.sources || []).filter((s: any) => !recentlyDeleted.has(s.id))
+        setSources(filteredSources)
       }
     } catch (error) {
       console.error('Error fetching websites:', error)
@@ -361,11 +394,24 @@ export default function WebsitePage() {
             description: data.message || 'Website deleted successfully',
           })
 
+          // Add to recently deleted set
+          setRecentlyDeleted(prev => new Set([...prev, source.id]))
+
+          // Remove from UI immediately
           setSources(sources.filter(s => s.id !== source.id))
           setSelectedSources(new Set())
           setShowRetrainingAlert(true)
           setRefreshTrigger(prev => prev + 1)
           setDeleteConfirmation({ isOpen: false, sourceIds: [], onConfirm: () => {} })
+
+          // Clear from recently deleted after 10 seconds
+          setTimeout(() => {
+            setRecentlyDeleted(prev => {
+              const newSet = new Set(prev)
+              newSet.delete(source.id)
+              return newSet
+            })
+          }, 10000)
         } catch (error) {
           toast({
             title: 'Error',
@@ -402,11 +448,24 @@ export default function WebsitePage() {
             description: data.message || `Deleted ${sourceArray.length} website(s)`,
           })
 
+          // Add all deleted items to recently deleted set
+          setRecentlyDeleted(prev => new Set([...prev, ...sourceArray]))
+
+          // Remove from UI immediately
           setSources(sources.filter(s => !selectedSources.has(s.id)))
           setSelectedSources(new Set())
           setShowRetrainingAlert(true)
           setRefreshTrigger(prev => prev + 1)
           setDeleteConfirmation({ isOpen: false, sourceIds: [], onConfirm: () => {} })
+
+          // Clear from recently deleted after 10 seconds
+          setTimeout(() => {
+            setRecentlyDeleted(prev => {
+              const newSet = new Set(prev)
+              sourceArray.forEach(id => newSet.delete(id))
+              return newSet
+            })
+          }, 10000)
         } catch (error) {
           toast({
             title: 'Error',
@@ -814,8 +873,9 @@ export default function WebsitePage() {
                     crawled: crawledPages.includes(url)
                   }))
 
-                  // Only show chevron for crawl_subpages mode
-                  const hasSubLinks = source.metadata?.crawl_subpages === true
+                  // Show chevron if crawl_subpages is true OR if discovered links exist
+                  const hasSubLinks = source.metadata?.crawl_subpages === true ||
+                                     (discoveredLinks && discoveredLinks.length > 0)
 
                   return (
                     <div key={source.id}>
@@ -875,53 +935,71 @@ export default function WebsitePage() {
                                 <p className="text-sm font-medium text-gray-900 hover:text-blue-600 transition-colors">
                                   {source.url}
                                 </p>
-                                <div className="flex items-center gap-2 mt-1">
+                                <div className="flex flex-col gap-1 mt-1">
+                                  {source.status === 'queued' && (
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-2 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded flex items-center gap-1">
+                                        <Clock className="h-3 w-3" />
+                                        Queued
+                                      </span>
+                                      {source.queue_position && (
+                                        <span className="text-xs text-gray-600">
+                                          Position {source.queue_position} in queue
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
                                   {(source.status === 'pending' || source.status === 'processing') && (
                                     <>
-                                      <span className="text-xs text-gray-600 flex items-center gap-1">
-                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                        {source.progress ? (
-                                          <>
-                                            {source.progress.phase === 'discovering'
-                                              ? `Discovering links... (found ${source.progress.discoveredLinks?.length || 0})`
-                                              : `Processing page ${source.progress.current} of ${source.progress.total}`
-                                            }
-                                          </>
-                                        ) : (
-                                          'Crawling in-progress'
+                                      <div className="flex items-center gap-2">
+                                        <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded flex items-center gap-1">
+                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                          Processing
+                                        </span>
+                                        <span className="text-xs text-gray-600 flex items-center gap-1">
+                                          {source.progress || source.metadata?.crawl_progress ? (
+                                            <>
+                                              {(source.progress || source.metadata?.crawl_progress).phase === 'discovering'
+                                                ? `Discovering links... (found ${(source.progress || source.metadata?.crawl_progress).discoveredLinks?.length || source.metadata?.discovered_links?.length || 0})`
+                                                : `Crawling page ${(source.progress || source.metadata?.crawl_progress).current} of ${(source.progress || source.metadata?.crawl_progress).total}`
+                                              }
+                                            </>
+                                          ) : (
+                                            'Starting crawl...'
+                                          )}
+                                        </span>
+                                        {source.progress && source.progress.averageTimePerPage && (
+                                          <span className="text-xs text-gray-400">
+                                            (~{Math.ceil(((source.progress.total - source.progress.current) * source.progress.averageTimePerPage) / 1000)}s remaining)
+                                          </span>
                                         )}
-                                      </span>
-                                      {source.progress && source.progress.averageTimePerPage && (
-                                        <span className="text-xs text-gray-400">
-                                          (~{Math.ceil(((source.progress.total - source.progress.current) * source.progress.averageTimePerPage) / 1000)}s remaining)
+                                      </div>
+                                      {(source.progress?.currentUrl || source.metadata?.crawl_progress?.currentUrl) && (
+                                        <span className="text-xs text-gray-400 truncate" title={source.progress?.currentUrl || source.metadata?.crawl_progress?.currentUrl}>
+                                          Current: {new URL(source.progress?.currentUrl || source.metadata?.crawl_progress?.currentUrl).pathname}
                                         </span>
                                       )}
                                     </>
                                   )}
-                                  {source.progress && source.progress.currentUrl && (
-                                    <span className="text-xs text-gray-400 truncate max-w-[200px]" title={source.progress.currentUrl}>
-                                      {new URL(source.progress.currentUrl).pathname}
-                                    </span>
-                                  )}
                                   {source.status === 'ready' && (
-                                    <>
+                                    <div className="flex items-center gap-2">
                                       <span className="px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded">
-                                        New
+                                        Ready
                                       </span>
                                       <span className="text-xs text-gray-500">
                                         Last crawled {formatTimeAgo(source.created_at)} • Links: {source.pages_crawled || source.metadata?.pages_crawled || 0}
                                       </span>
-                                    </>
+                                    </div>
                                   )}
                                   {source.status === 'error' && (
-                                    <>
+                                    <div className="flex items-center gap-2">
                                       <span className="px-2 py-0.5 text-xs bg-red-100 text-red-800 rounded">
                                         Failed
                                       </span>
                                       <span className="text-xs text-gray-500">
                                         {source.metadata?.error_message || 'Failed to crawl'}
                                       </span>
-                                    </>
+                                    </div>
                                   )}
                                 </div>
                               </>
@@ -1019,7 +1097,7 @@ export default function WebsitePage() {
                                     </div>
                                   )}
                                 </div>
-                                <div className="max-h-64 overflow-y-auto overflow-x-hidden border border-gray-200 rounded-md bg-gray-50 p-2">
+                                <div className="max-h-96 overflow-y-auto overflow-x-hidden border border-gray-200 rounded-md bg-gray-50 p-2">
                                   <div className="space-y-1">
                                     {subLinks.map((link: SubLink, index: number) => {
                                   const linkId = `${source.id}-${index}`
@@ -1033,6 +1111,11 @@ export default function WebsitePage() {
                                         {link.crawled ? (
                                           <span className="px-1.5 py-0.5 text-xs bg-green-100 text-green-800 rounded flex-shrink-0 whitespace-nowrap">
                                             Crawled
+                                          </span>
+                                        ) : source.status === 'processing' ? (
+                                          <span className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-700 rounded flex-shrink-0 whitespace-nowrap flex items-center gap-1">
+                                            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                            Processing
                                           </span>
                                         ) : (
                                           <span className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded flex-shrink-0 whitespace-nowrap">

@@ -209,51 +209,32 @@ export async function discoverAnthropicModels(apiKey: string): Promise<ModelInfo
 export async function syncDiscoveredModels(projectId: string) {
   const supabase = await createClient()
 
-  // Get API keys for this project
-  const { data: credentials } = await supabase
-    .from('ai_provider_credentials')
-    .select('*, ai_providers!inner(name)')
-    .eq('project_id', projectId)
-
-  if (!credentials || credentials.length === 0) {
-    return { success: false, message: 'No API keys configured' }
-  }
-
   const allModels: ModelInfo[] = []
 
-  // Discover models from each provider
-  for (const cred of credentials) {
-    const providerName = cred.ai_providers.name
-    let apiKey: string | undefined
+  // Discover models from all configured providers using environment variables
 
-    // Extract API key based on provider
-    if (providerName === 'openai') {
-      apiKey = cred.credentials.OPENAI_API_KEY || cred.credentials.api_key
-    } else if (providerName === 'google') {
-      apiKey = cred.credentials.GEMINI_API_KEY || cred.credentials.api_key
-    } else if (providerName === 'anthropic') {
-      apiKey = cred.credentials.ANTHROPIC_API_KEY || cred.credentials.api_key
+  // OpenAI
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const openaiModels = await discoverOpenAIModels(process.env.OPENAI_API_KEY)
+      allModels.push(...openaiModels)
+    } catch (error) {
+      console.error('Failed to discover OpenAI models:', error)
     }
-
-    if (!apiKey) continue
-
-    // Discover models based on provider
-    let discoveredModels: ModelInfo[] = []
-
-    switch (providerName) {
-      case 'openai':
-        discoveredModels = await discoverOpenAIModels(apiKey)
-        break
-      case 'google':
-        discoveredModels = await discoverGeminiModels(apiKey)
-        break
-      case 'anthropic':
-        discoveredModels = await discoverAnthropicModels(apiKey)
-        break
-    }
-
-    allModels.push(...discoveredModels)
   }
+
+  // Google Gemini
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const geminiModels = await discoverGeminiModels(process.env.GEMINI_API_KEY)
+      allModels.push(...geminiModels)
+    } catch (error) {
+      console.error('Failed to discover Gemini models:', error)
+    }
+  }
+
+  // Note: Anthropic models are typically static, not discoverable via API
+  // Add them manually if needed
 
   // Sync to database
   let syncedCount = 0

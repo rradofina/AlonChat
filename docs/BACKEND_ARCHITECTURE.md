@@ -85,7 +85,7 @@ AlonChat is a Chatbase competitor with unique features:
 ### Core Tables
 
 ```sql
--- Projects (Workspaces) with Pricing Tiers
+-- Projects with Pricing Tiers
 CREATE TABLE projects (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(255) NOT NULL,

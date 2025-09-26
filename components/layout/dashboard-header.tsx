@@ -2,9 +2,10 @@
 
 import Link from 'next/link'
 import { usePathname, useParams, useRouter } from 'next/navigation'
-import { Bot, ChevronRight, User, Settings, LogOut, Shield, Key, Database, Code } from 'lucide-react'
+import { Bot, ChevronRight, User, Settings, LogOut, Shield, Database } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { isAdminEmailClient } from '@/lib/utils/admin-access'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -79,7 +80,7 @@ export function DashboardHeader({ projectName, agentName }: DashboardHeaderProps
     fetchData()
   }, [params.id, projectName, agentName])
 
-  const displayProjectName = projectName || project?.name || 'Raymond Adofina\'s Workspace'
+  const displayProjectName = projectName || project?.name || 'My Project'
   const displayPlan = 'Free' // You can get this from project data later
   const displayAgentName = agentName || agent?.name
 
@@ -160,27 +161,21 @@ export function DashboardHeader({ projectName, agentName }: DashboardHeaderProps
               Account settings
             </DropdownMenuItem>
 
-            <DropdownMenuSeparator />
+            {/* Admin Section - Only show if user is admin */}
+            {isAdminEmailClient(user?.email) && (
+              <>
+                <DropdownMenuSeparator />
 
-            {/* Admin Section - Temporary for Development */}
-            <div className="px-2 py-1.5">
-              <span className="text-xs text-gray-500 uppercase tracking-wider">Admin (Dev Only)</span>
-            </div>
+                <div className="px-2 py-1.5">
+                  <span className="text-xs text-gray-500 uppercase tracking-wider">Admin</span>
+                </div>
 
-            <DropdownMenuItem onClick={() => router.push('/dashboard/settings/api-keys')}>
-              <Key className="mr-2 h-4 w-4 text-blue-600" />
-              <span className="text-blue-600">API Keys</span>
-            </DropdownMenuItem>
-
-            <DropdownMenuItem onClick={() => router.push('/admin/models')}>
-              <Database className="mr-2 h-4 w-4 text-red-600" />
-              <span className="text-red-600">Manage Models</span>
-            </DropdownMenuItem>
-
-            <DropdownMenuItem onClick={() => router.push('/admin/providers')}>
-              <Code className="mr-2 h-4 w-4 text-purple-600" />
-              <span className="text-purple-600">Manage Providers</span>
-            </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => router.push('/admin/models')}>
+                  <Database className="mr-2 h-4 w-4 text-red-600" />
+                  <span className="text-red-600">Manage Models</span>
+                </DropdownMenuItem>
+              </>
+            )}
 
             <DropdownMenuSeparator />
 

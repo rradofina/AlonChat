@@ -1,16 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
-
-export interface ChunkOptions {
-  sourceId: string
-  agentId: string
-  projectId: string
-  content: string
-  metadata?: any
-  chunkSize?: number // Characters per chunk
-  chunkOverlap?: number // Overlap between chunks for context
-  supabaseClient?: any // Optional supabase client to use
-}
+import { ChunkOptions } from '@/lib/types/crawler'
 
 export class ChunkManager {
   static readonly DEFAULT_CHUNK_SIZE = 8000 // 8KB chunks (increased for better performance)
@@ -123,6 +113,145 @@ export class ChunkManager {
     }
 
     return chunks.length
+  }
+
+  /**
+   * Append chunks without deleting existing ones (for progressive crawling)
+   * This method is specifically for website crawling where we add chunks progressively
+   */
+  static async appendChunks(options: ChunkOptions): Promise<number> {
+    const {
+      sourceId,
+      agentId,
+      projectId,
+      content,
+      metadata = {},
+      chunkSize = this.DEFAULT_CHUNK_SIZE,
+      chunkOverlap = this.DEFAULT_OVERLAP,
+      supabaseClient
+    } = options
+
+    const supabase = supabaseClient || createServiceClient()
+
+    // Get the highest existing position to continue from
+    const { data: existingChunks } = await supabase
+      .from('source_chunks')
+      .select('position')
+      .eq('source_id', sourceId)
+      .order('position', { ascending: false })
+      .limit(1)
+
+    const startPosition = existingChunks && existingChunks.length > 0
+      ? existingChunks[0].position + 1
+      : 0
+
+    // Limit content to prevent memory issues (200KB max per page)
+    const MAX_CONTENT_PER_PAGE = 200000
+    if (content.length > MAX_CONTENT_PER_PAGE) {
+      console.warn(`[ChunkManager] Content too large (${content.length} chars), truncating to ${MAX_CONTENT_PER_PAGE}`)
+      content = content.substring(0, MAX_CONTENT_PER_PAGE)
+    }
+
+    // Split content into chunks - NO LIMIT for progressive crawling
+    const chunks = this.splitIntoChunksNoLimit(content, chunkSize, chunkOverlap)
+
+    if (chunks.length === 0) {
+      console.warn(`[ChunkManager] No chunks created for source ${sourceId}`)
+      return 0
+    }
+
+    console.log(`[ChunkManager] Appending ${chunks.length} chunks starting at position ${startPosition} for source ${sourceId}`)
+
+    // Prepare chunk records with continued position numbering
+    const chunkRecords = chunks.map((chunk, index) => ({
+      source_id: sourceId,
+      agent_id: agentId,
+      project_id: projectId,
+      content: chunk.text,
+      position: startPosition + index,
+      tokens: this.estimateTokens(chunk.text),
+      metadata: {
+        ...metadata,
+        chunk_index: startPosition + index,
+        start_char: chunk.start,
+        end_char: chunk.end
+      }
+    }))
+
+    // Insert chunks in batches
+    const batchSize = 50
+    let insertedCount = 0
+
+    for (let i = 0; i < chunkRecords.length; i += batchSize) {
+      const batch = chunkRecords.slice(i, i + batchSize)
+      const { error } = await supabase
+        .from('source_chunks')
+        .insert(batch)
+
+      if (error) {
+        console.error(`[ChunkManager] Error inserting chunk batch:`, error)
+        throw new Error(`Failed to insert chunks: ${error.message}`)
+      }
+
+      insertedCount += batch.length
+      if (insertedCount % 200 === 0) {
+        console.log(`[ChunkManager] Inserted ${insertedCount}/${chunkRecords.length} chunks`)
+      }
+    }
+
+    return chunks.length
+  }
+
+  /**
+   * Split text into chunks without the 1000 limit (for progressive crawling)
+   */
+  private static splitIntoChunksNoLimit(
+    text: string,
+    chunkSize: number,
+    overlap: number
+  ): Array<{ text: string; start: number; end: number }> {
+    if (!text || text.length === 0) {
+      return []
+    }
+
+    const chunks: Array<{ text: string; start: number; end: number }> = []
+    let start = 0
+
+    while (start < text.length) {
+      let end = start + chunkSize
+
+      // If this isn't the last chunk, try to break at a sentence boundary
+      if (end < text.length) {
+        const sentenceEnders = ['. ', '.\n', '! ', '!\n', '? ', '?\n']
+        let bestBreak = end
+
+        for (const ender of sentenceEnders) {
+          const lastIndex = text.lastIndexOf(ender, end)
+          if (lastIndex > start + chunkSize * 0.8) {
+            bestBreak = lastIndex + ender.length
+            break
+          }
+        }
+        end = bestBreak
+      }
+
+      const chunkText = text.substring(start, Math.min(end, text.length)).trim()
+      if (chunkText) {
+        chunks.push({
+          text: chunkText,
+          start,
+          end: Math.min(end, text.length)
+        })
+      }
+
+      // Move to next chunk with overlap
+      start = end - overlap
+      if (start <= chunks[chunks.length - 1]?.start) {
+        start = end
+      }
+    }
+
+    return chunks
   }
 
   /**

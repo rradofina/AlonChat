@@ -1,5 +1,6 @@
 -- Create projects table if it doesn't exist
 -- Projects are the new primary organizational unit replacing workspaces
+-- This migration marks the transition from workspace-based to project-based architecture
 
 CREATE TABLE IF NOT EXISTS projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
