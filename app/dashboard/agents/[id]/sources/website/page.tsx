@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { AlertCircle, Globe, Trash2, X, ChevronRight, ChevronDown, MoreHorizontal, Edit, RefreshCw, Loader2, Info } from 'lucide-react'
+import { AlertCircle, Globe, Trash2, X, ChevronRight, ChevronDown, MoreHorizontal, Edit, RefreshCw, Loader2, Info, Lock, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useParams } from 'next/navigation'
@@ -48,6 +48,8 @@ interface WebsiteSource {
 export default function WebsitePage() {
   const params = useParams()
   const [url, setUrl] = useState('')
+  const [protocol, setProtocol] = useState<'https' | 'http'>('https')
+  const [showProtocolDropdown, setShowProtocolDropdown] = useState(false)
   const [showRetrainingAlert, setShowRetrainingAlert] = useState(false)
   const [agentTrained, setAgentTrained] = useState(false)
   const [crawlOption, setCrawlOption] = useState('crawl')
@@ -71,9 +73,11 @@ export default function WebsitePage() {
   const [selectedSubLink, setSelectedSubLink] = useState<SubLink | null>(null)
 
   const handleUrlChange = (value: string) => {
-    setUrl(value)
+    // Remove any protocol if user types it in the input
+    const cleanedValue = value.replace(/^https?:\/\//i, '')
+    setUrl(cleanedValue)
     // Only show retraining alert if agent has been trained before
-    if (value && !showRetrainingAlert && agentTrained) {
+    if (cleanedValue && !showRetrainingAlert && agentTrained) {
       setShowRetrainingAlert(true)
     }
   }
@@ -118,13 +122,17 @@ export default function WebsitePage() {
       if (openDropdown && !(event.target as Element).closest('.dropdown-menu')) {
         setOpenDropdown(null)
       }
+      // Also close protocol dropdown
+      if (showProtocolDropdown && !(event.target as Element).closest('.protocol-dropdown')) {
+        setShowProtocolDropdown(false)
+      }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [openDropdown])
+  }, [openDropdown, showProtocolDropdown])
 
   const fetchWebsiteSources = async () => {
     try {
@@ -161,13 +169,16 @@ export default function WebsitePage() {
       return
     }
 
+    // Combine protocol and URL
+    const fullUrl = `${protocol}://${url}`
+
     setIsLoading(true)
     try {
       const response = await fetch(`/api/agents/${params.id}/sources/website`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url,
+          url: fullUrl,
           crawlSubpages: crawlOption === 'crawl', // Always crawl subpages when in crawl mode
           maxPages: crawlOption === 'crawl' ? maxPages : 1,
           fullPageContent
@@ -178,6 +189,7 @@ export default function WebsitePage() {
         const data = await response.json()
         setSources([...sources, data.source])
         setUrl('')
+        setProtocol('https') // Reset protocol to default
         toast({
           title: 'Success',
           description: 'Website crawling started',
@@ -478,14 +490,60 @@ export default function WebsitePage() {
               <div className="space-y-4 mt-6">
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-2 block">URL</label>
-                  <div className="flex gap-2">
-                    <Input
-                      type="url"
-                      value={url}
-                      onChange={(e) => handleUrlChange(e.target.value)}
-                      placeholder="https://www.example.com"
-                      className="flex-1"
-                    />
+                  <div className="relative">
+                    <div className="flex">
+                      {/* Clean Protocol Selector */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setShowProtocolDropdown(!showProtocolDropdown)}
+                          className="flex items-center gap-1 px-3 h-10 bg-white border border-gray-300 border-r-0 rounded-l-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 focus:z-10"
+                        >
+                          <span className="text-sm text-gray-600">{protocol}://</span>
+                          <ChevronDown className="h-3.5 w-3.5 text-gray-400" />
+                        </button>
+
+                        {/* Clean Dropdown */}
+                        {showProtocolDropdown && (
+                          <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-md z-10 overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setProtocol('https')
+                                setShowProtocolDropdown(false)
+                              }}
+                              className={`w-full px-3 py-2 text-sm text-left hover:bg-gray-50 transition-colors ${
+                                protocol === 'https' ? 'bg-blue-50 text-blue-600' : 'text-gray-700'
+                              }`}
+                            >
+                              https://
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setProtocol('http')
+                                setShowProtocolDropdown(false)
+                              }}
+                              className={`w-full px-3 py-2 text-sm text-left hover:bg-gray-50 transition-colors ${
+                                protocol === 'http' ? 'bg-blue-50 text-blue-600' : 'text-gray-700'
+                              }`}
+                            >
+                              http://
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Clean URL Input */}
+                      <Input
+                        type="text"
+                        value={url}
+                        onChange={(e) => handleUrlChange(e.target.value)}
+                        placeholder="example.com"
+                        className="flex-1 rounded-l-none focus:z-10"
+                        style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}
+                      />
+                    </div>
                   </div>
                   {crawlOption === 'crawl' && (
                     <div className="flex items-start gap-1.5 mt-2">
@@ -873,7 +931,7 @@ export default function WebsitePage() {
 
                         {/* Expanded Sub-links */}
                         {isExpanded && (
-                          <div className="mt-3 ml-12 space-y-1 pb-2">
+                          <div className="mt-3 ml-12 pb-2">
                             {subLinks && subLinks.length > 0 ? (
                               <>
                                 <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
@@ -884,12 +942,14 @@ export default function WebsitePage() {
                                     </span>
                                   )}
                                 </p>
-                                {subLinks.map((link: SubLink, index: number) => {
+                                <div className="max-h-64 overflow-y-auto pr-2 border border-gray-200 rounded-md bg-gray-50 p-2">
+                                  <div className="space-y-1">
+                                    {subLinks.map((link: SubLink, index: number) => {
                                   const linkId = `${source.id}-${index}`
                                   return (
-                                    <div key={index} className="flex items-center justify-between py-1 hover:bg-gray-50 rounded px-2 -mx-2 group">
-                                      <div className="flex-1 flex items-center gap-2">
-                                        <span className="text-sm text-gray-700 truncate">
+                                    <div key={index} className="flex items-center justify-between py-1 hover:bg-white rounded px-2 group">
+                                      <div className="flex-1 flex items-center gap-2 min-w-0">
+                                        <span className="text-sm text-gray-700 truncate block" title={link.url}>
                                           {link.url}
                                         </span>
                                         {/* Show status badge */}
@@ -955,8 +1015,10 @@ export default function WebsitePage() {
                                         </button>
                                       </div>
                                     </div>
-                                  )
-                                })}
+                                    )
+                                  })}
+                                  </div>
+                                </div>
                               </>
                             ) : (
                               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">

@@ -109,6 +109,7 @@ export class WebsiteScraper {
           .filter(link => {
             try {
               const url = new URL(link)
+              // Only crawl same domain, no external links
               return url.hostname === this.domain && !this.crawledUrls.has(link)
             } catch {
               return false
@@ -282,6 +283,17 @@ export class WebsiteScraper {
     try {
       const parsedUrl = new URL(url)
       const path = parsedUrl.pathname.toLowerCase()
+
+      // Skip external domains (social media, etc)
+      const externalDomains = [
+        'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
+        'youtube.com', 'linkedin.com', 'pinterest.com', 'reddit.com',
+        'tiktok.com', 'snapchat.com', 'whatsapp.com', 'telegram.org'
+      ]
+
+      if (externalDomains.some(domain => parsedUrl.hostname.includes(domain))) {
+        return false
+      }
 
       // Skip non-HTML resources
       const skipExtensions = [

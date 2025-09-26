@@ -23,53 +23,101 @@ export default function ApiKeysPage() {
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<Record<string, boolean>>({})
+  const [currentProject, setCurrentProject] = useState<{ id: string, name: string } | null>(null)
+  const [currentUser, setCurrentUser] = useState<{ email: string, id: string } | null>(null)
+  const [allProjects, setAllProjects] = useState<any[]>([])
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const supabase = createClient()
 
   useEffect(() => {
     loadProviders()
   }, [])
 
-  async function loadProviders() {
+  async function loadProviders(projectId?: string) {
     try {
-      // Get current project
+      // Get current user
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      const { data: projects } = await supabase
+      console.log('Current user:', user.email)
+      setCurrentUser({ email: user.email || '', id: user.id })
+
+      // Get ALL projects with their API key status
+      const { data: allProjectsData } = await supabase
         .from('projects')
-        .select('id')
-        .eq('owner_id', user.id)
-        .single()
+        .select(`
+          id,
+          name,
+          owner_id,
+          created_at,
+          ai_provider_credentials(id)
+        `)
+        .order('created_at', { ascending: false })
 
-      if (!projects) return
+      console.log('All projects found:', allProjectsData)
 
-      // Get all providers and their credentials
-      const { data: allProviders } = await supabase
-        .from('ai_providers')
-        .select('*')
-        .eq('is_active', true)
-        .order('display_name')
+      if (allProjectsData) {
+        const projectsWithInfo = allProjectsData.map(p => ({
+          ...p,
+          hasApiKeys: (p.ai_provider_credentials && p.ai_provider_credentials.length > 0),
+          isOwner: p.owner_id === user.id
+        }))
+        setAllProjects(projectsWithInfo)
 
-      // Get existing credentials for this project
-      const { data: existingCreds } = await supabase
-        .from('ai_provider_credentials')
-        .select('*')
-        .eq('project_id', projects.id)
-
-      // Merge provider info with credentials
-      const providerList = allProviders?.map(provider => {
-        const creds = existingCreds?.find(c => c.provider_id === provider.id)
-        return {
-          provider_id: provider.id,
-          provider_name: provider.name,
-          provider_display: provider.display_name,
-          required_env_vars: provider.required_env_vars || [],
-          credentials: creds?.credentials || {},
-          is_configured: !!creds
+        // Select a project to use
+        let activeProject = null
+        if (projectId) {
+          // Use specified project
+          activeProject = projectsWithInfo.find(p => p.id === projectId)
+        } else if (selectedProjectId) {
+          // Use previously selected project
+          activeProject = projectsWithInfo.find(p => p.id === selectedProjectId)
+        } else {
+          // Auto-select: prefer owned projects with API keys, then any with API keys, then owned, then any
+          activeProject =
+            projectsWithInfo.find(p => p.isOwner && p.hasApiKeys) ||
+            projectsWithInfo.find(p => p.hasApiKeys) ||
+            projectsWithInfo.find(p => p.isOwner) ||
+            projectsWithInfo[0]
         }
-      }) || []
 
-      setProviders(providerList)
+        if (!activeProject) {
+          console.error('No projects available')
+          return
+        }
+
+        console.log('Using project:', activeProject.name, activeProject.id)
+        setCurrentProject({ id: activeProject.id, name: activeProject.name })
+        setSelectedProjectId(activeProject.id)
+
+        // Get all providers and their credentials
+        const { data: allProviders } = await supabase
+          .from('ai_providers')
+          .select('*')
+          .eq('is_active', true)
+          .order('display_name')
+
+        // Get existing credentials for this project
+        const { data: existingCreds } = await supabase
+          .from('ai_provider_credentials')
+          .select('*')
+          .eq('project_id', activeProject.id)
+
+        // Merge provider info with credentials
+        const providerList = allProviders?.map(provider => {
+          const creds = existingCreds?.find(c => c.provider_id === provider.id)
+          return {
+            provider_id: provider.id,
+            provider_name: provider.name,
+            provider_display: provider.display_name,
+            required_env_vars: provider.required_env_vars || [],
+            credentials: creds?.credentials || {},
+            is_configured: !!creds
+          }
+        }) || []
+
+        setProviders(providerList)
+      }
     } catch (error) {
       console.error('Error loading providers:', error)
       toast.error('Failed to load API providers')
@@ -82,22 +130,15 @@ export default function ApiKeysPage() {
     setSaving({ ...saving, [providerId]: true })
 
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not authenticated')
+      if (!currentProject) throw new Error('No project selected')
 
-      const { data: projects } = await supabase
-        .from('projects')
-        .select('id')
-        .eq('owner_id', user.id)
-        .single()
-
-      if (!projects) throw new Error('No project found')
+      const activeProject = currentProject
 
       // Check if credentials already exist
       const { data: existing } = await supabase
         .from('ai_provider_credentials')
         .select('id')
-        .eq('project_id', projects.id)
+        .eq('project_id', activeProject.id)
         .eq('provider_id', providerId)
         .single()
 
@@ -115,7 +156,7 @@ export default function ApiKeysPage() {
         await supabase
           .from('ai_provider_credentials')
           .insert({
-            project_id: projects.id,
+            project_id: activeProject.id,
             provider_id: providerId,
             credentials,
             is_active: true
@@ -151,6 +192,45 @@ export default function ApiKeysPage() {
         <p className="text-gray-600 mt-1">
           Configure your AI provider API keys. These are stored securely per project.
         </p>
+
+        {/* Debug info */}
+        {currentUser && (
+          <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-md space-y-2">
+            <p className="text-sm text-gray-700">
+              Logged in as: <strong>{currentUser.email}</strong>
+            </p>
+            {allProjects.length > 1 && (
+              <div>
+                <Label className="text-sm">Select Project:</Label>
+                <select
+                  value={selectedProjectId || ''}
+                  onChange={(e) => {
+                    setSelectedProjectId(e.target.value)
+                    loadProviders(e.target.value)
+                  }}
+                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm"
+                >
+                  {allProjects.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} {p.hasApiKeys ? '(Has API Keys)' : '(No API Keys)'} {p.isOwner ? '- Your Project' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
+
+        {currentProject && (
+          <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded-md">
+            <p className="text-sm text-blue-700">
+              Managing API keys for project: <strong>{currentProject.name}</strong>
+              {providers.filter(p => p.is_configured).length > 0 &&
+                ` (${providers.filter(p => p.is_configured).length} providers configured)`
+              }
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-6">

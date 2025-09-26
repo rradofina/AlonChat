@@ -20,7 +20,23 @@ export async function getConfiguredProvider(projectId: string, providerName: str
     return null
   }
 
-  const apiKey = credential.credentials.api_key
+  // Extract the API key based on provider - handle different credential formats
+  let apiKey: string | undefined
+
+  switch (providerName) {
+    case 'openai':
+      apiKey = credential.credentials.OPENAI_API_KEY || credential.credentials.api_key
+      break
+    case 'google':
+      apiKey = credential.credentials.GEMINI_API_KEY || credential.credentials.api_key
+      break
+    case 'anthropic':
+      apiKey = credential.credentials.ANTHROPIC_API_KEY || credential.credentials.api_key
+      break
+    default:
+      apiKey = credential.credentials.api_key || credential.credentials.API_KEY
+  }
+
   if (!apiKey) {
     return null
   }
@@ -66,10 +82,12 @@ export async function chatWithProjectCredentials(
   if (!provider || !provider.isConfigured()) {
     const { data: hasCredentials } = await supabase
       .from('ai_provider_credentials')
-      .select('id')
+      .select(`
+        id,
+        ai_providers!inner(name)
+      `)
       .eq('project_id', projectId)
       .eq('ai_providers.name', models.provider)
-      .inner('ai_providers')
       .single()
 
     if (!hasCredentials) {

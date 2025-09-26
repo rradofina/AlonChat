@@ -111,14 +111,17 @@ export class PlaywrightScraper {
 
         // Add subpages to queue if enabled
         if (this.crawlSubpages && !result.error) {
-          const subpages = result.links.filter(link => {
-            try {
-              const url = new URL(link)
-              return url.hostname === this.domain && !this.crawledUrls.has(link)
-            } catch {
-              return false
-            }
-          })
+          const subpages = result.links
+            .filter(link => this.isValidCrawlUrl(link))
+            .filter(link => {
+              try {
+                const url = new URL(link)
+                // Only crawl same domain, no external links
+                return url.hostname === this.domain && !this.crawledUrls.has(link)
+              } catch {
+                return false
+              }
+            })
 
           urlQueue.push(...subpages.slice(0, this.maxPages - results.length))
         }
@@ -321,6 +324,47 @@ export class PlaywrightScraper {
 
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms))
+  }
+
+  private isValidCrawlUrl(url: string): boolean {
+    try {
+      const parsedUrl = new URL(url)
+      const path = parsedUrl.pathname.toLowerCase()
+
+      // Skip external domains (social media, etc)
+      const externalDomains = [
+        'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
+        'youtube.com', 'linkedin.com', 'pinterest.com', 'reddit.com',
+        'tiktok.com', 'snapchat.com', 'whatsapp.com', 'telegram.org'
+      ]
+
+      if (externalDomains.some(domain => parsedUrl.hostname.includes(domain))) {
+        return false
+      }
+
+      // Skip non-HTML resources
+      const skipExtensions = [
+        '.pdf', '.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp',
+        '.mp4', '.mp3', '.wav', '.avi', '.mov',
+        '.zip', '.rar', '.tar', '.gz',
+        '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+        '.css', '.js', '.json', '.xml', '.txt', '.csv'
+      ]
+
+      if (skipExtensions.some(ext => path.endsWith(ext))) {
+        return false
+      }
+
+      // Skip common non-content paths
+      const skipPaths = ['/api/', '/assets/', '/static/', '/download/', '/files/']
+      if (skipPaths.some(skip => path.includes(skip))) {
+        return false
+      }
+
+      return true
+    } catch {
+      return false
+    }
   }
 }
 
