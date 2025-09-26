@@ -744,7 +744,7 @@ export default function WebsitePage() {
 
           {/* Link Sources List - Only show entire section when we have data */}
           {filteredSources.length > 0 && (
-            <div className="overflow-hidden">
+            <div>
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Link sources</h2>
 
               {/* Controls */}
@@ -797,7 +797,7 @@ export default function WebsitePage() {
               </div>
 
               {/* Sources List */}
-              <div className="overflow-hidden">
+              <div>
                 {currentSources.map((source, index) => {
                   const isExpanded = expandedSources.has(source.id)
                   const isEditing = editingSource === source.id
@@ -818,7 +818,7 @@ export default function WebsitePage() {
                   const hasSubLinks = source.metadata?.crawl_subpages === true
 
                   return (
-                    <div key={source.id} className="overflow-hidden">
+                    <div key={source.id}>
                       <div className="py-3 hover:bg-gray-50 transition-colors">
                         <div className="flex items-start gap-3">
                           <Checkbox
@@ -838,7 +838,7 @@ export default function WebsitePage() {
                           <Globe className="h-5 w-5 text-gray-400 mt-0.5" />
 
                           <div
-                            className="flex-1 min-w-0 overflow-hidden"
+                            className="flex-1 min-w-0"
                             style={{ cursor: !isEditing && !hasSubLinks ? 'pointer' : 'default' }}
                             onClick={() => {
                               if (!isEditing && !hasSubLinks && source.status === 'ready') {
@@ -942,7 +942,7 @@ export default function WebsitePage() {
                                 <MoreHorizontal className="h-4 w-4 text-gray-400" />
                               </button>
                               {openDropdown === source.id && (
-                              <div className="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                              <div className="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
                                 <button
                                   onClick={() => {
                                     setEditingSource(source.id)
@@ -1043,7 +1043,7 @@ export default function WebsitePage() {
                                             <MoreHorizontal className="h-4 w-4 text-gray-400" />
                                           </button>
                                           {openDropdown === linkId && (
-                                            <div className="absolute right-0 mt-2 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                                            <div className="absolute right-0 mt-2 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
                                               <button
                                                 onClick={() => {
                                                   // Handle edit link

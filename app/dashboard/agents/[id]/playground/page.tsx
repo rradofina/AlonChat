@@ -7,6 +7,7 @@ import { Send, Bot, User, RefreshCw, Copy, Download, Save, Smile, Lightbulb } fr
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { configService, AIModel, PromptPreset } from '@/lib/api/config'
+import { ModelSelector, type Model } from '@/components/ui/model-selector'
 
 interface Message {
   id: string
@@ -58,7 +59,7 @@ export default function PlaygroundPage() {
 
       // Set default model if not already set
       if (!selectedModel && models.length > 0) {
-        setSelectedModel(models[0].model_id)
+        setSelectedModel(models[0].name)
       }
 
       // Set default preset if not already set
@@ -267,44 +268,26 @@ export default function PlaygroundPage() {
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Model
           </label>
-          <div className="relative">
-            <select
-              value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none pr-8 text-sm"
-              disabled={loadingConfig}
-            >
-              {loadingConfig ? (
-                <option>Loading models...</option>
-              ) : (
-                <>
-                  {/* Group models by provider */}
-                  {Object.entries(
-                    availableModels.reduce((acc, model) => {
-                      if (!acc[model.provider]) {
-                        acc[model.provider] = []
-                      }
-                      acc[model.provider].push(model)
-                      return acc
-                    }, {} as Record<string, AIModel[]>)
-                  ).map(([provider, models]) => (
-                    <optgroup key={provider} label={provider.charAt(0).toUpperCase() + provider.slice(1)}>
-                      {models.map(model => (
-                        <option key={model.id} value={model.model_id}>
-                          {model.display_name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </>
-              )}
-            </select>
-            <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
-              <svg className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-              </svg>
-            </div>
-          </div>
+          <ModelSelector
+            models={availableModels.map(model => ({
+              id: model.id,
+              name: model.name,
+              display_name: model.display_name,
+              provider: model.provider,
+              description: model.description,
+              context_window: model.context_window,
+              max_tokens: model.max_tokens,
+              capabilities: model.request_template?.capabilities || {},
+              cost: model.request_template?.pricing ? {
+                input: model.request_template.pricing.input_per_million ? model.request_template.pricing.input_per_million / 1000 : 0,
+                output: model.request_template?.pricing.output_per_million ? model.request_template.pricing.output_per_million / 1000 : 0,
+              } : undefined
+            }))}
+            value={selectedModel}
+            onValueChange={(value) => setSelectedModel(value)}
+            placeholder={loadingConfig ? "Loading models..." : "Select a model..."}
+            disabled={loadingConfig}
+          />
         </div>
 
         {/* Temperature Slider */}
