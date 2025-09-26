@@ -29,7 +29,7 @@ const nextConfig = {
       },
     ];
   },
-  webpack: (config, { isServer, dev }) => {
+  webpack: (config, { isServer }) => {
     // Configure webpack for pdfjs-dist
     config.resolve.alias = {
       ...config.resolve.alias,
@@ -43,27 +43,6 @@ const nextConfig = {
         fs: false,
         path: false,
         crypto: false,
-      }
-    }
-
-    // Fix Jest worker error in Next.js 15
-    if (dev && !isServer) {
-      config.optimization = {
-        ...config.optimization,
-        runtimeChunk: false,
-        splitChunks: {
-          cacheGroups: {
-            default: false,
-          },
-        },
-      }
-
-      // Disable worker processes
-      const TerserPlugin = config.optimization.minimizer?.find(
-        plugin => plugin.constructor.name === 'TerserPlugin'
-      )
-      if (TerserPlugin) {
-        TerserPlugin.options.parallel = false
       }
     }
 

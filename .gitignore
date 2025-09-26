@@ -47,4 +47,11 @@ Thumbs.db
 
 # Temporary folders
 tmp/
-temp/ 
+temp/
+
+# Test artifacts
+playwright-report/
+test-results/
+
+# Sample screenshots
+Sample/ 

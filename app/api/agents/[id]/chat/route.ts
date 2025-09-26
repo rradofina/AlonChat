@@ -10,7 +10,8 @@ const ChatRequestSchema = z.object({
   sessionId: z.string().optional(),
   useRAG: z.boolean().optional().default(true),
   maxContextChunks: z.number().optional().default(5),
-  similarityThreshold: z.number().optional().default(0.7)
+  similarityThreshold: z.number().optional().default(0.7),
+  sourceTypes: z.array(z.string()).optional()
 })
 
 
@@ -73,7 +74,8 @@ export async function POST(
           agentId,
           validatedData.message,
           validatedData.maxContextChunks,
-          validatedData.similarityThreshold
+          validatedData.similarityThreshold,
+          validatedData.sourceTypes
         )
 
         if (similarChunks.length > 0) {

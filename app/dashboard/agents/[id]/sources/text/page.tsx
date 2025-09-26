@@ -346,57 +346,60 @@ export default function TextPage() {
             </div>
           </div>
 
-          {/* Text Sources List */}
-          <div className="mt-8">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Text sources</h2>
+          {/* Text Sources List - Only show entire section when we have text sources or loading */}
+          {(isLoading || textSources.length > 0) && (
+            <div className="mt-8">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Text sources</h2>
 
-            {/* Controls row */}
-            <div className="mb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Checkbox
-                    checked={allPageSelected}
-                    onChange={() => {
-                      if (allPageSelected) {
-                        setSelectedSources(prev => prev.filter(id => !currentSources.find(source => source.id === id)))
-                      } else {
-                        setSelectedSources(prev => {
-                          const newIds = currentSources.map(source => source.id)
-                          return Array.from(new Set([...prev, ...newIds]))
-                        })
-                      }
-                    }}
-                  />
-                  <span className="text-sm text-gray-600">Select all</span>
-                  {selectedSources.length > 0 && (
-                    <span className="ml-2 text-sm text-gray-500">
-                      {selectedSources.length} item(s) selected
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-4">
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="Search..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
+              {/* Controls row - Only show when we have text sources */}
+              {!isLoading && textSources.length > 0 && (
+              <div className="mb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      checked={allPageSelected}
+                      onChange={() => {
+                        if (allPageSelected) {
+                          setSelectedSources(prev => prev.filter(id => !currentSources.find(source => source.id === id)))
+                        } else {
+                          setSelectedSources(prev => {
+                            const newIds = currentSources.map(source => source.id)
+                            return Array.from(new Set([...prev, ...newIds]))
+                          })
+                        }
+                      }}
                     />
+                    <span className="text-sm text-gray-600">Select all</span>
+                    {selectedSources.length > 0 && (
+                      <span className="ml-2 text-sm text-gray-500">
+                        {selectedSources.length} item(s) selected
+                      </span>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="text-gray-700">Sort by:</span>
-                    <CustomSelect
-                      value={sortBy}
-                      onChange={setSortBy}
-                      options={['Default', 'Newest', 'Oldest', 'Name (A-Z)', 'Name (Z-A)', 'Size (Smallest)', 'Size (Largest)']}
-                    />
+                  <div className="flex items-center gap-4">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Search..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-gray-700">Sort by:</span>
+                      <CustomSelect
+                        value={sortBy}
+                        onChange={setSortBy}
+                        options={['Default', 'Newest', 'Oldest', 'Name (A-Z)', 'Name (Z-A)', 'Size (Smallest)', 'Size (Largest)']}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Text Sources List - No container, ultra-minimal */}
             <div>
@@ -404,15 +407,7 @@ export default function TextPage() {
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
                 </div>
-              ) : currentSources.length === 0 ? (
-                <div className="flex items-center justify-center text-center py-12">
-                  <div>
-                    <Edit2 className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                    <p className="text-sm font-medium text-gray-900">No text snippets</p>
-                    <p className="text-xs text-gray-500 mt-1">Add text snippets to get started</p>
-                  </div>
-                </div>
-              ) : (
+              ) : textSources.length === 0 ? null : (
                 <div className="divide-y divide-gray-100">
                   {currentSources.map((source) => (
                     <div key={source.id}>
@@ -565,7 +560,8 @@ export default function TextPage() {
               isFirstPage={isFirstPage}
               isLastPage={isLastPage}
             />
-          </div>
+            </div>
+          )}
         </div>
       </div>
 

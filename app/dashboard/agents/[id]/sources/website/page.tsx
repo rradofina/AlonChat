@@ -12,6 +12,7 @@ import { FloatingActionBar } from '@/components/ui/floating-action-bar'
 import { Checkbox } from '@/components/ui/checkbox'
 import { usePagination } from '@/hooks/usePagination'
 import { PaginationControls } from '@/components/ui/pagination-controls'
+import { WebsiteViewer } from '@/components/agents/website-viewer'
 
 interface SubLink {
   url: string
@@ -36,12 +37,12 @@ export default function WebsitePage() {
   const params = useParams()
   const [url, setUrl] = useState('')
   const [showRetrainingAlert, setShowRetrainingAlert] = useState(false)
+  const [agentTrained, setAgentTrained] = useState(false)
   const [crawlOption, setCrawlOption] = useState('crawl')
   const [sources, setSources] = useState<WebsiteSource[]>([])
   const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(false)
-  const [crawlSubpages, setCrawlSubpages] = useState(true)
-  const [maxPages, setMaxPages] = useState(10)
+  const [maxPages, setMaxPages] = useState(100)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set())
   const [editingSource, setEditingSource] = useState<string | null>(null)
@@ -53,17 +54,50 @@ export default function WebsitePage() {
   const [slowScraping, setSlowScraping] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('Default')
+  const [selectedWebsite, setSelectedWebsite] = useState<WebsiteSource | null>(null)
+  const [selectedSubLink, setSelectedSubLink] = useState<SubLink | null>(null)
 
   const handleUrlChange = (value: string) => {
     setUrl(value)
-    if (value && !showRetrainingAlert) {
+    // Only show retraining alert if agent has been trained before
+    if (value && !showRetrainingAlert && agentTrained) {
       setShowRetrainingAlert(true)
     }
   }
 
   useEffect(() => {
     fetchWebsiteSources()
+    fetchAgentStatus()
   }, [])
+
+  // Auto-refresh for crawling status
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/agents/${params.id}/sources/website`)
+        if (response.ok) {
+          const data = await response.json()
+          const currentSources = data.sources || []
+
+          // Only update if there are pending/processing websites
+          const hasCrawlingWebsites = currentSources.some((s: any) =>
+            s.status === 'pending' || s.status === 'processing'
+          )
+
+          if (hasCrawlingWebsites) {
+            setSources(currentSources)
+          } else if (sources.some(s => s.status === 'pending' || s.status === 'processing')) {
+            // Final update when all crawling is done
+            setSources(currentSources)
+          }
+        }
+      } catch (error) {
+        console.error('Error refreshing websites:', error)
+      }
+    }, 3000) // Check every 3 seconds
+
+    return () => clearInterval(interval)
+  }, [params.id, sources])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -91,6 +125,19 @@ export default function WebsitePage() {
     }
   }
 
+  const fetchAgentStatus = async () => {
+    try {
+      const response = await fetch(`/api/agents/${params.id}`)
+      if (response.ok) {
+        const data = await response.json()
+        // Check if agent has been trained before (last_trained_at exists)
+        setAgentTrained(!!data.agent?.last_trained_at)
+      }
+    } catch (error) {
+      console.error('Error fetching agent status:', error)
+    }
+  }
+
   const handleFetchLinks = async () => {
     if (!url) {
       toast({
@@ -108,7 +155,7 @@ export default function WebsitePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url,
-          crawlSubpages: crawlOption === 'crawl' ? crawlSubpages : false,
+          crawlSubpages: crawlOption === 'crawl', // Always crawl subpages when in crawl mode
           maxPages: crawlOption === 'crawl' ? maxPages : 1
         }),
       })
@@ -121,7 +168,10 @@ export default function WebsitePage() {
           title: 'Success',
           description: 'Website crawling started',
         })
-        setShowRetrainingAlert(true)
+        // Only show retraining alert if agent has been trained before
+        if (agentTrained) {
+          setShowRetrainingAlert(true)
+        }
         setRefreshTrigger(prev => prev + 1)
       } else {
         throw new Error('Failed to start crawling')
@@ -333,11 +383,40 @@ export default function WebsitePage() {
 
   const allPageSelected = currentSources.length > 0 && currentSources.every(source => selectedSources.has(source.id))
 
+  // Format time ago helper
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString)
+    const now = new Date()
+    const seconds = Math.floor((now.getTime() - date.getTime()) / 1000)
+
+    if (seconds < 60) return 'Just now'
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`
+    if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`
+    return date.toLocaleDateString()
+  }
+
+  const closeWebsiteViewer = () => {
+    setSelectedWebsite(null)
+    setSelectedSubLink(null)
+  }
+
+  // Show website viewer if a website is selected
+  if (selectedWebsite) {
+    return (
+      <WebsiteViewer
+        website={selectedWebsite}
+        subLink={selectedSubLink}
+        onBack={closeWebsiteViewer}
+      />
+    )
+  }
+
   return (
     <div className="flex h-full">
       {/* Main Content Area */}
-      <div className="flex-1 p-8 pb-24">
-        <div className="mx-auto w-full max-w-6xl">
+      <div className="flex-1 px-8 pt-8 pb-4 bg-white min-h-full">
+        <div className="w-full">
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">Website</h1>
           <p className="text-sm text-gray-600 mb-6">
             Crawl web pages or submit sitemaps to update your AI with the latest content.
@@ -356,9 +435,8 @@ export default function WebsitePage() {
           )}
 
           {/* Add Links Section */}
-          <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
-            <div className="p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Add links</h2>
+          <div className="bg-gray-50 rounded-lg p-6 mb-8">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Add links</h2>
 
               <div className="flex gap-4 mb-6">
                 <button
@@ -407,34 +485,6 @@ export default function WebsitePage() {
 
                 {crawlOption === 'crawl' && (
                   <>
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                      <input
-                        type="checkbox"
-                        id="crawl-subpages"
-                        checked={crawlSubpages}
-                        onChange={(e) => setCrawlSubpages(e.target.checked)}
-                        className="rounded border-gray-300"
-                      />
-                      <label htmlFor="crawl-subpages">
-                        Crawl all subpages
-                      </label>
-                    </div>
-                    {crawlSubpages && (
-                      <div>
-                        <label className="text-sm font-medium text-gray-700 mb-2 block">
-                          Max pages to crawl
-                        </label>
-                        <Input
-                          type="number"
-                          value={maxPages}
-                          onChange={(e) => setMaxPages(parseInt(e.target.value) || 10)}
-                          min="1"
-                          max="100"
-                          className="w-32"
-                        />
-                      </div>
-                    )}
-
                     {/* Advanced Options Dropdown */}
                     <div className="border-t pt-4">
                       <button
@@ -451,6 +501,27 @@ export default function WebsitePage() {
 
                       {showAdvancedOptions && (
                         <div className="mt-4 space-y-4">
+                          <div>
+                            <label className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+                              Max pages to crawl
+                              <div className="relative group">
+                                <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" />
+                                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50">
+                                  <div className="absolute bottom-[-4px] left-1/2 transform -translate-x-1/2 w-2 h-2 bg-gray-900 rotate-45"></div>
+                                  Maximum 1000 pages can be crawled
+                                </div>
+                              </div>
+                            </label>
+                            <Input
+                              type="number"
+                              value={maxPages}
+                              onChange={(e) => setMaxPages(parseInt(e.target.value) || 100)}
+                              min="1"
+                              max="1000"
+                              className="w-32"
+                            />
+                          </div>
+
                           <div>
                             <label className="text-sm font-medium text-gray-700 mb-2 block">
                               Include only paths
@@ -510,68 +581,65 @@ export default function WebsitePage() {
                   </Button>
                 </div>
               </div>
-            </div>
           </div>
 
-          {/* Link Sources List */}
-          <div className="mt-8">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Link sources</h2>
+          {/* Link Sources List - Only show entire section when we have data */}
+          {filteredSources.length > 0 && (
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Link sources</h2>
 
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 text-sm text-gray-700 hover:text-gray-900 cursor-pointer">
-                  <Checkbox
-                    checked={allPageSelected}
-                    onChange={() => {
-                      setSelectedSources(prev => {
-                        const next = new Set(prev)
-                        if (allPageSelected) {
-                          currentSources.forEach(source => next.delete(source.id))
-                        } else {
-                          currentSources.forEach(source => next.add(source.id))
-                        }
-                        return next
-                      })
-                    }}
-                  />
-                  <span>Select all</span>
-                </label>
-                {selectedSources.size > 0 && (
-                  <span className="text-sm text-gray-500">
-                    {selectedSources.size} item(s) selected
-                  </span>
-                )}
-              </div>
-
-              <div className="flex items-center gap-4">
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Search..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
-                  />
+              {/* Controls */}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 text-sm text-gray-700 hover:text-gray-900 cursor-pointer">
+                    <Checkbox
+                      checked={allPageSelected}
+                      onChange={() => {
+                        setSelectedSources(prev => {
+                          const next = new Set(prev)
+                          if (allPageSelected) {
+                            currentSources.forEach(source => next.delete(source.id))
+                          } else {
+                            currentSources.forEach(source => next.add(source.id))
+                          }
+                          return next
+                        })
+                      }}
+                    />
+                    <span>Select all</span>
+                  </label>
+                  {selectedSources.size > 0 && (
+                    <span className="text-sm text-gray-500">
+                      {selectedSources.size} item(s) selected
+                    </span>
+                  )}
                 </div>
 
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-gray-700">Sort by:</span>
-                  <CustomSelect
-                    value={sortBy}
-                    onChange={setSortBy}
-                    options={['Default', 'Status', 'Newest', 'Oldest', 'Alphabetical (A-Z)', 'Alphabetical (Z-A)']}
-                  />
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Search..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-gray-700">Sort by:</span>
+                    <CustomSelect
+                      value={sortBy}
+                      onChange={setSortBy}
+                      options={['Default', 'Status', 'Newest', 'Oldest', 'Alphabetical (A-Z)', 'Alphabetical (Z-A)']}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {filteredSources.length === 0 ? (
-              <div className="bg-white border border-gray-200 rounded-lg p-6">
-                <p className="text-sm text-gray-500 text-center">No websites added yet</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {currentSources.map((source) => {
+              {/* Sources List */}
+              <div>
+                {currentSources.map((source, index) => {
                   const isExpanded = expandedSources.has(source.id)
                   const isEditing = editingSource === source.id
                   const subLinks = source.metadata?.crawl_errors ? [] :
@@ -582,12 +650,12 @@ export default function WebsitePage() {
                        crawled: true
                      })))
 
-                  // Show chevron if we have pages_crawled count even if crawled_pages array is missing
-                  const hasSubLinks = (subLinks && subLinks.length > 0) || source.pages_crawled > 0
+                  // Always show chevron for website sources
+                  const hasSubLinks = true
 
                   return (
-                    <div key={source.id} className="bg-white border border-gray-200 rounded-lg">
-                      <div className="p-4">
+                    <div key={source.id}>
+                      <div className="py-3 hover:bg-gray-50 transition-colors">
                         <div className="flex items-start gap-3">
                           <Checkbox
                             checked={selectedSources.has(source.id)}
@@ -602,20 +670,6 @@ export default function WebsitePage() {
                             }}
                             className="mt-1"
                           />
-
-                          {/* Expand/Collapse Button */}
-                          {hasSubLinks && (
-                            <button
-                              onClick={() => toggleExpanded(source.id)}
-                              className="p-0.5 hover:bg-gray-100 rounded mt-0.5"
-                            >
-                              {isExpanded ? (
-                                <ChevronDown className="h-4 w-4 text-gray-500" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4 text-gray-500" />
-                              )}
-                            </button>
-                          )}
 
                           <Globe className="h-5 w-5 text-gray-400 mt-0.5" />
 
@@ -646,53 +700,53 @@ export default function WebsitePage() {
                               <>
                                 <p className="text-sm font-medium text-gray-900">
                                   {source.url}
-                                  {source.status === 'ready' && (
-                                    <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded">
-                                      New
-                                    </span>
-                                  )}
                                 </p>
-                                <div className="text-xs text-gray-500 mt-1">
-                                  {source.status === 'pending' && (
-                                    <span className="text-yellow-600 flex items-center gap-1">
-                                      <Loader2 className="h-3 w-3 animate-spin" />
-                                      Pending...
-                                    </span>
-                                  )}
-                                  {source.status === 'processing' && (
-                                    <span className="text-blue-600 flex items-center gap-1">
+                                <div className="flex items-center gap-2 mt-1">
+                                  {(source.status === 'pending' || source.status === 'processing') && (
+                                    <span className="text-xs text-gray-600 flex items-center gap-1">
                                       <Loader2 className="h-3 w-3 animate-spin" />
                                       Crawling in-progress
                                     </span>
                                   )}
                                   {source.status === 'ready' && (
                                     <>
-                                      Last crawled {new Date(source.created_at).toLocaleDateString()} •
-                                      Links: {source.pages_crawled || 0}
+                                      <span className="px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded">
+                                        New
+                                      </span>
+                                      <span className="text-xs text-gray-500">
+                                        Last crawled {formatTimeAgo(source.created_at)} • Links: {source.pages_crawled || source.metadata?.pages_crawled || 0}
+                                      </span>
                                     </>
                                   )}
                                   {source.status === 'error' && (
-                                    <span className="text-red-600">
-                                      Error: {source.metadata?.error_message || 'Failed to crawl'}
-                                    </span>
+                                    <>
+                                      <span className="px-2 py-0.5 text-xs bg-red-100 text-red-800 rounded">
+                                        Failed
+                                      </span>
+                                      <span className="text-xs text-gray-500">
+                                        {source.metadata?.error_message || 'Failed to crawl'}
+                                      </span>
+                                    </>
                                   )}
                                 </div>
                               </>
                             )}
                           </div>
 
-                          {/* Actions Menu */}
-                          <div className="relative dropdown-menu">
-                            <button
-                              className="p-1 hover:bg-gray-100 rounded"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setOpenDropdown(openDropdown === source.id ? null : source.id)
-                              }}
-                            >
-                              <MoreHorizontal className="h-4 w-4 text-gray-400" />
-                            </button>
-                            {openDropdown === source.id && (
+                          {/* Expand/Collapse and Actions */}
+                          <div className="flex items-center gap-1">
+                            {/* Actions Menu */}
+                            <div className="relative dropdown-menu">
+                              <button
+                                className="p-1 hover:bg-gray-100 rounded"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setOpenDropdown(openDropdown === source.id ? null : source.id)
+                                }}
+                              >
+                                <MoreHorizontal className="h-4 w-4 text-gray-400" />
+                              </button>
+                              {openDropdown === source.id && (
                               <div className="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
                                 <button
                                   onClick={() => {
@@ -728,114 +782,137 @@ export default function WebsitePage() {
                                 </button>
                               </div>
                             )}
+                            </div>
+
+                            {/* Expand/Collapse Button */}
+                            {hasSubLinks && (
+                              <button
+                                onClick={() => toggleExpanded(source.id)}
+                                className="p-1 hover:bg-gray-100 rounded"
+                                title={isExpanded ? "Collapse" : "Expand"}
+                              >
+                                {isExpanded ? (
+                                  <ChevronDown className="h-4 w-4 text-gray-500" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4 text-gray-500" />
+                                )}
+                              </button>
+                            )}
                           </div>
                         </div>
 
                         {/* Expanded Sub-links */}
                         {isExpanded && (
-                          <div className="mt-4 ml-12 space-y-2">
+                          <div className="mt-3 ml-12 space-y-1 pb-2">
                             {subLinks && subLinks.length > 0 ? (
                               <>
-                                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
                                   {subLinks.length} LINKS INCLUDED
                                 </p>
-                                {subLinks.map((link, index) => {
+                                {subLinks.map((link: SubLink, index: number) => {
                                   const linkId = `${source.id}-${index}`
                                   return (
-                                    <div key={index} className="flex items-center justify-between">
+                                    <div key={index} className="flex items-center justify-between py-1 hover:bg-gray-50 rounded px-2 -mx-2 group">
                                       <div className="flex-1 flex items-center gap-2">
-                                        <span className="text-sm text-gray-700">
+                                        <span className="text-sm text-gray-700 truncate">
                                           {link.url}
                                         </span>
-                                        <span className="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded">
+                                        {/* Show New badge for recently crawled links */}
+                                        <span className="px-1.5 py-0.5 text-xs bg-green-100 text-green-800 rounded">
                                           New
                                         </span>
                                       </div>
 
-                                      {/* Sub-link Actions Menu */}
-                                      <div className="relative dropdown-menu">
+                                      <div className="flex items-center gap-1">
+                                        {/* Sub-link Actions Menu */}
+                                        <div className="relative dropdown-menu">
+                                          <button
+                                            className="p-1 hover:bg-gray-100 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              setOpenDropdown(openDropdown === linkId ? null : linkId)
+                                            }}
+                                          >
+                                            <MoreHorizontal className="h-4 w-4 text-gray-400" />
+                                          </button>
+                                          {openDropdown === linkId && (
+                                            <div className="absolute right-0 mt-2 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                                              <button
+                                                onClick={() => {
+                                                  // Handle edit link
+                                                  setOpenDropdown(null)
+                                                }}
+                                                className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 flex items-center gap-2"
+                                              >
+                                                <Edit className="h-3 w-3" />
+                                                Edit
+                                              </button>
+                                              <button
+                                                onClick={() => {
+                                                  handleExcludeLink(source.id, link.url)
+                                                  setOpenDropdown(null)
+                                                }}
+                                                className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 text-red-600 flex items-center gap-2"
+                                              >
+                                                <X className="h-3 w-3" />
+                                                Exclude link
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+
+                                        {/* Navigate to Details */}
                                         <button
-                                          className="p-1 hover:bg-gray-100 rounded"
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            setOpenDropdown(openDropdown === linkId ? null : linkId)
+                                          onClick={() => {
+                                            setSelectedWebsite(source)
+                                            setSelectedSubLink(link)
                                           }}
+                                          className="p-1 hover:bg-gray-100 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                          title="View details"
                                         >
-                                          <MoreHorizontal className="h-4 w-4 text-gray-400" />
+                                          <ChevronRight className="h-4 w-4 text-gray-400" />
                                         </button>
-                                        {openDropdown === linkId && (
-                                          <div className="absolute right-0 mt-2 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
-                                            <button
-                                              onClick={() => {
-                                                // Handle edit link
-                                                setOpenDropdown(null)
-                                              }}
-                                              className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 flex items-center gap-2"
-                                            >
-                                              <Edit className="h-3 w-3" />
-                                              Edit
-                                            </button>
-                                            <button
-                                              onClick={() => {
-                                                handleExcludeLink(source.id, link.url)
-                                                setOpenDropdown(null)
-                                              }}
-                                              className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 text-red-600 flex items-center gap-2"
-                                            >
-                                              <X className="h-3 w-3" />
-                                              Exclude link
-                                            </button>
-                                          </div>
-                                        )}
                                       </div>
                                     </div>
                                   )
                                 })}
                               </>
                             ) : (
-                              <p className="text-xs text-gray-600">
-                                {source.pages_crawled} pages crawled •
-                                <button
-                                  onClick={() => handleReCrawl(source.id)}
-                                  className="text-blue-600 hover:underline"
-                                >
-                                  Re-crawl to view links
-                                </button>
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                                NO LINKS FOUND
                               </p>
                             )}
                           </div>
                         )}
                       </div>
+                      {index < currentSources.length - 1 && <div className="border-b border-gray-200" />}
                     </div>
                   )
                 })}
               </div>
-            )}
 
-          </div>
-
-          {/* Pagination Controls */}
-          <PaginationControls
-            currentPage={currentPage}
-            totalPages={totalPages}
-            rowsPerPage={rowsPerPage}
-            totalItems={filteredSources.length}
-            onPageChange={goToPage}
-            onRowsPerPageChange={(rows) => {
-              setRowsPerPage(rows)
-              // Clear selections when changing page size
-              setSelectedSources(new Set())
-            }}
-            rowsPerPageOptions={[5, 10, 25, 50]}
-            showPagination={showPagination}
-            itemsRange={itemsRange}
-            isFirstPage={isFirstPage}
-            isLastPage={isLastPage}
-            itemLabel="link"
-          />
+              {/* Pagination Controls */}
+              <PaginationControls
+                currentPage={currentPage}
+                totalPages={totalPages}
+                rowsPerPage={rowsPerPage}
+                totalItems={filteredSources.length}
+                onPageChange={goToPage}
+                onRowsPerPageChange={(rows) => {
+                  setRowsPerPage(rows)
+                  // Clear selections when changing page size
+                  setSelectedSources(new Set())
+                }}
+                rowsPerPageOptions={[5, 10, 25, 50]}
+                showPagination={showPagination}
+                itemsRange={itemsRange}
+                isFirstPage={isFirstPage}
+                isLastPage={isLastPage}
+                itemLabel="link"
+              />
+            </div>
+          )}
         </div>
-        {/* Add padding at bottom */}
-        <div className="h-6"></div>
       </div>
 
       {/* Right Sidebar */}

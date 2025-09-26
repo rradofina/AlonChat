@@ -3,7 +3,11 @@
     "allow": [
       "Bash(dir:*)",
       "mcp__supabase__execute_sql",
-      "mcp__supabase__get_logs"
+      "mcp__supabase__get_logs",
+      "WebSearch",
+      "Bash(powershell:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

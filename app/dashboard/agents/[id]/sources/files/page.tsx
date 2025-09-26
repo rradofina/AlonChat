@@ -470,57 +470,60 @@ export default function FilesPage() {
             </div>
           </div>
 
-          {/* File Sources List */}
-          <div className="mt-8">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">File sources</h2>
+          {/* File Sources List - Only show entire section when we have files or loading */}
+          {(isLoading || files.length > 0) && (
+            <div className="mt-8">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">File sources</h2>
 
-            {/* Controls row */}
-            <div className="mb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Checkbox
-                    checked={allPageSelected}
-                    onChange={() => {
-                      if (allPageSelected) {
-                        setSelectedFiles(prev => prev.filter(id => !currentFiles.find(file => file.id === id)))
-                      } else {
-                        setSelectedFiles(prev => {
-                          const newIds = currentFiles.map(file => file.id)
-                          return Array.from(new Set([...prev, ...newIds]))
-                        })
-                      }
-                    }}
-                  />
-                  <span className="text-sm text-gray-600">Select all</span>
-                  {selectedFiles.length > 0 && (
-                    <span className="ml-2 text-sm text-gray-500">
-                      {selectedFiles.length} item(s) selected
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-4">
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="Search..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
+              {/* Controls row - Only show when we have files */}
+              {!isLoading && files.length > 0 && (
+              <div className="mb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      checked={allPageSelected}
+                      onChange={() => {
+                        if (allPageSelected) {
+                          setSelectedFiles(prev => prev.filter(id => !currentFiles.find(file => file.id === id)))
+                        } else {
+                          setSelectedFiles(prev => {
+                            const newIds = currentFiles.map(file => file.id)
+                            return Array.from(new Set([...prev, ...newIds]))
+                          })
+                        }
+                      }}
                     />
+                    <span className="text-sm text-gray-600">Select all</span>
+                    {selectedFiles.length > 0 && (
+                      <span className="ml-2 text-sm text-gray-500">
+                        {selectedFiles.length} item(s) selected
+                      </span>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="text-gray-700">Sort by:</span>
-                    <CustomSelect
-                      value={sortBy}
-                      onChange={setSortBy}
-                      options={['Default', 'Newest', 'Oldest', 'Name (A-Z)', 'Name (Z-A)', 'Size (Smallest)', 'Size (Largest)']}
-                    />
+                  <div className="flex items-center gap-4">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Search..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-gray-700">Sort by:</span>
+                      <CustomSelect
+                        value={sortBy}
+                        onChange={setSortBy}
+                        options={['Default', 'Newest', 'Oldest', 'Name (A-Z)', 'Name (Z-A)', 'Size (Smallest)', 'Size (Largest)']}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Files List - No container, ultra-minimal */}
             <div>
@@ -528,15 +531,7 @@ export default function FilesPage() {
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
                 </div>
-              ) : currentFiles.length === 0 ? (
-                <div className="flex items-center justify-center text-center py-12">
-                  <div>
-                    <FileText className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                    <p className="text-sm font-medium text-gray-900">No files uploaded</p>
-                    <p className="text-xs text-gray-500 mt-1">Upload files to get started</p>
-                  </div>
-                </div>
-              ) : (
+              ) : files.length === 0 ? null : (
                 <div className="divide-y divide-gray-100">
                   {currentFiles.map((file) => (
                     <div key={file.id}>
@@ -820,7 +815,8 @@ export default function FilesPage() {
               isLastPage={isLastPage}
               itemLabel="file"
             />
-          </div>
+            </div>
+          )}
         </div>
       </div>
 

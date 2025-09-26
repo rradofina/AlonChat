@@ -145,9 +145,11 @@ export async function POST(
       )
     }
 
-    // Store Q&A content in chunks for RAG
-    const qaContent = JSON.stringify({ questions: questionsArray, answer })
+    // Store Q&A content as a single chunk (no need to split Q&A pairs)
+    // This prevents duplication issues with multiple questions
+    const qaContent = `Questions: ${questionsArray.join(', ')}\n\nAnswer: ${answer}`
     try {
+      // For Q&A, we create a single chunk per source since Q&A pairs are already atomic
       const chunkCount = await ChunkManager.storeChunks({
         sourceId: source.id,
         agentId: params.id,
@@ -159,8 +161,8 @@ export async function POST(
           questions: questionsArray,
           has_images: metadata.has_images
         },
-        chunkSize: 2000, // Smaller chunks for Q&A
-        chunkOverlap: 200 // Less overlap for Q&A
+        chunkSize: 10000, // Large chunk size to ensure single chunk for Q&A
+        chunkOverlap: 0 // No overlap needed for single chunks
       })
 
       console.log(`Created ${chunkCount} chunks for Q&A source ${source.id}`)
@@ -354,7 +356,8 @@ export async function PUT(
         content: JSON.stringify({ questions: questionsArray, answer }), // Store as array
         size_kb: sizeKb,
         metadata: updatedMetadata,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        is_trained: false // Mark as untrained after update so it gets re-embedded
       })
       .eq('id', sourceId)
       .eq('agent_id', params.id)
@@ -367,6 +370,52 @@ export async function PUT(
         { error: 'Failed to update Q&A' },
         { status: 500 }
       )
+    }
+
+    // Delete old chunks and create new ones after update
+    try {
+      // Delete existing chunks
+      await supabase
+        .from('source_chunks')
+        .delete()
+        .eq('source_id', sourceId)
+
+      // Get project_id from source
+      const { data: agent } = await supabase
+        .from('agents')
+        .select('project_id')
+        .eq('id', params.id)
+        .single()
+
+      if (agent) {
+        // Create new chunks with updated content
+        const qaContent = `Questions: ${questionsArray.join(', ')}\n\nAnswer: ${answer}`
+        const chunkCount = await ChunkManager.storeChunks({
+          sourceId: sourceId,
+          agentId: params.id,
+          projectId: agent.project_id,
+          content: qaContent,
+          metadata: {
+            title: title || questionsArray[0],
+            type: 'qa',
+            questions: questionsArray,
+            has_images: updatedMetadata.has_images
+          },
+          chunkSize: 10000, // Large chunk size to ensure single chunk for Q&A
+          chunkOverlap: 0 // No overlap needed for single chunks
+        })
+
+        // Update chunk count
+        await supabase
+          .from('sources')
+          .update({ chunk_count: chunkCount })
+          .eq('id', sourceId)
+
+        console.log(`Updated Q&A ${sourceId} with ${chunkCount} chunks`)
+      }
+    } catch (chunkError) {
+      console.error('Error updating chunks:', chunkError)
+      // Don't fail the whole operation, Q&A is still updated
     }
 
     // Format for frontend

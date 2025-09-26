@@ -281,12 +281,14 @@ export class EmbeddingService {
     agentId: string,
     query: string,
     limit: number = 5,
-    similarityThreshold: number = 0.7
+    similarityThreshold: number = 0.7,
+    sourceTypes?: string[]
   ): Promise<Array<{
     id: string
     content: string
     similarity: number
     metadata: any
+    sourceType?: string
   }>> {
     // Generate embedding for query
     const queryEmbedding = await this.generateEmbedding(query)
@@ -303,7 +305,8 @@ export class EmbeddingService {
       query_embedding: vectorString,
       agent_uuid: agentId,
       limit_count: limit,
-      similarity_threshold: similarityThreshold
+      similarity_threshold: similarityThreshold,
+      source_types: sourceTypes || null
     })
 
     if (error) {
@@ -315,7 +318,8 @@ export class EmbeddingService {
       id: item.chunk_id,
       content: item.content,
       similarity: item.similarity,
-      metadata: item.metadata
+      metadata: item.metadata,
+      sourceType: item.source_type
     }))
   }
 

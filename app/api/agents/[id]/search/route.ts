@@ -25,7 +25,7 @@ export async function POST(
 
     // Get search parameters from request body
     const body = await request.json()
-    const { query, limit = 5, similarityThreshold = 0.7 } = body
+    const { query, limit = 5, similarityThreshold = 0.7, sourceTypes } = body
 
     if (!query) {
       return NextResponse.json({ error: 'Query is required' }, { status: 400 })
@@ -41,7 +41,8 @@ export async function POST(
       params.id,
       query,
       limit,
-      similarityThreshold
+      similarityThreshold,
+      sourceTypes
     )
 
     console.log(`[Search] Found ${results.length} similar chunks`)

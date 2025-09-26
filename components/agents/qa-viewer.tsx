@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+import { RichTextEditor } from '@/components/ui/rich-text-editor'
 import { formatDistanceToNow } from 'date-fns'
 import { useToast } from '@/components/ui/use-toast'
 import { uploadMultipleImages, isValidImageType, validateImageSize, deleteMultipleImages } from '@/lib/supabase/storage'
@@ -420,12 +420,12 @@ export function QAViewer({ qa, onBack, onDelete, onUpdate }: QAViewerProps) {
                     {/* Edit Answer */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Answer</label>
-                      <Textarea
+                      <RichTextEditor
                         value={editAnswer}
-                        onChange={(e) => setEditAnswer(e.target.value)}
-                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-gray-400 min-h-[200px] resize-y"
-                        placeholder="Enter answer..."
+                        onChange={setEditAnswer}
+                        placeholder="Enter answer with formatting, links, and emojis..."
                         disabled={isSaving}
+                        minHeight="min-h-[250px]"
                       />
                       <div className="text-right text-xs text-gray-500 mt-1">
                         {formatBytes(new TextEncoder().encode(editAnswer).length)}
@@ -561,9 +561,12 @@ export function QAViewer({ qa, onBack, onDelete, onUpdate }: QAViewerProps) {
                     {/* Answer Section */}
                     <div>
                       <h3 className="text-xs uppercase tracking-wide text-gray-400 mb-3">Answer</h3>
-                      <pre className="leading-7 text-gray-800 whitespace-pre-wrap font-sans text-[0.95rem]">
-                        {qa.answer}
-                      </pre>
+                      <div
+                        className="prose prose-sm max-w-none text-gray-800"
+                        dangerouslySetInnerHTML={{
+                          __html: qa.answer.includes('<') ? qa.answer : `<p>${qa.answer.replace(/\n/g, '<br/>')}</p>`
+                        }}
+                      />
                     </div>
 
                     {/* Images Section */}

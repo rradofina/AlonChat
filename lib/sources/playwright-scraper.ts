@@ -1,5 +1,5 @@
+import { chromium, Browser, Page } from 'playwright'
 import * as cheerio from 'cheerio'
-import { scrapeWebsiteWithPlaywright } from './playwright-scraper'
 
 export interface CrawlResult {
   url: string
@@ -10,11 +10,12 @@ export interface CrawlResult {
   error?: string
 }
 
-export class WebsiteScraper {
+export class PlaywrightScraper {
   private maxPages: number
   private crawlSubpages: boolean
   private crawledUrls: Set<string> = new Set()
   private domain: string = ''
+  private browser: Browser | null = null
 
   constructor(maxPages: number = 10, crawlSubpages: boolean = true) {
     this.maxPages = maxPages
@@ -40,35 +41,60 @@ export class WebsiteScraper {
       }]
     }
 
-    while (urlQueue.length > 0 && results.length < this.maxPages) {
-      const currentUrl = urlQueue.shift()!
+    try {
+      // Launch browser
+      console.log('Launching browser for crawling...')
+      this.browser = await chromium.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      })
 
-      if (this.crawledUrls.has(currentUrl)) {
-        continue
+      while (urlQueue.length > 0 && results.length < this.maxPages) {
+        const currentUrl = urlQueue.shift()!
+
+        if (this.crawledUrls.has(currentUrl)) {
+          continue
+        }
+
+        this.crawledUrls.add(currentUrl)
+
+        // Add delay to respect rate limits
+        if (results.length > 0) {
+          await this.delay(1000)
+        }
+
+        const result = await this.crawlPage(currentUrl)
+        results.push(result)
+
+        // Add subpages to queue if enabled
+        if (this.crawlSubpages && !result.error) {
+          const subpages = result.links.filter(link => {
+            try {
+              const url = new URL(link)
+              return url.hostname === this.domain && !this.crawledUrls.has(link)
+            } catch {
+              return false
+            }
+          })
+
+          urlQueue.push(...subpages.slice(0, this.maxPages - results.length))
+        }
       }
-
-      this.crawledUrls.add(currentUrl)
-
-      // Add delay to respect rate limits
-      if (results.length > 0) {
-        await this.delay(1000)
-      }
-
-      const result = await this.crawlPage(currentUrl)
-      results.push(result)
-
-      // Add subpages to queue if enabled
-      if (this.crawlSubpages && !result.error) {
-        const subpages = result.links.filter(link => {
-          try {
-            const url = new URL(link)
-            return url.hostname === this.domain && !this.crawledUrls.has(link)
-          } catch {
-            return false
-          }
-        })
-
-        urlQueue.push(...subpages.slice(0, this.maxPages - results.length))
+    } catch (error: any) {
+      console.error('Browser launch error:', error)
+      // If Playwright fails, return error result
+      return [{
+        url: startUrl,
+        title: '',
+        content: '',
+        links: [],
+        images: [],
+        error: `Browser launch failed: ${error.message}`
+      }]
+    } finally {
+      // Close browser
+      if (this.browser) {
+        await this.browser.close()
       }
     }
 
@@ -76,37 +102,50 @@ export class WebsiteScraper {
   }
 
   private async crawlPage(url: string): Promise<CrawlResult> {
-    try {
-      console.log(`Crawling page: ${url}`)
+    let page: Page | null = null
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        },
-        redirect: 'follow'
+    try {
+      console.log(`Crawling page with Playwright: ${url}`)
+
+      if (!this.browser) {
+        throw new Error('Browser not initialized')
+      }
+
+      // Create a new page
+      page = await this.browser.newPage()
+
+      // Set user agent to avoid detection
+      await page.setExtraHTTPHeaders({
+        'Accept-Language': 'en-US,en;q=0.9'
       })
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      // Navigate to the page
+      const response = await page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000
+      })
+
+      if (!response) {
+        throw new Error('No response received')
       }
 
-      const contentType = response.headers.get('content-type') || ''
-      if (!contentType.includes('text/html')) {
-        throw new Error('Not an HTML page')
+      const status = response.status()
+      if (status >= 400) {
+        throw new Error(`HTTP ${status}`)
       }
 
-      const html = await response.text()
+      // Wait a bit for JavaScript to render
+      await page.waitForTimeout(2000)
+
+      // Get the page content
+      const html = await page.content()
       const $ = cheerio.load(html)
 
       // Remove script and style elements
       $('script, style, noscript').remove()
 
       // Extract title
-      const title = $('title').text().trim() ||
+      const title = await page.title() ||
                    $('h1').first().text().trim() ||
                    'Untitled Page'
 
@@ -164,6 +203,8 @@ export class WebsiteScraper {
         }
       })
 
+      console.log(`Successfully crawled ${url}: ${content.length} chars`)
+
       return {
         url,
         title,
@@ -174,7 +215,6 @@ export class WebsiteScraper {
 
     } catch (error: any) {
       console.error(`Failed to crawl ${url}:`, error.message)
-      console.error('Full error:', error)
       return {
         url,
         title: '',
@@ -182,6 +222,11 @@ export class WebsiteScraper {
         links: [],
         images: [],
         error: error.message || 'Failed to crawl page'
+      }
+    } finally {
+      // Close the page
+      if (page) {
+        await page.close()
       }
     }
   }
@@ -221,30 +266,11 @@ export class WebsiteScraper {
   }
 }
 
-export async function scrapeWebsite(
+export async function scrapeWebsiteWithPlaywright(
   url: string,
   maxPages: number = 10,
   crawlSubpages: boolean = true
 ): Promise<CrawlResult[]> {
-  try {
-    // Try Playwright first for better success rate
-    console.log('Attempting to crawl with Playwright...')
-    const results = await scrapeWebsiteWithPlaywright(url, maxPages, crawlSubpages)
-
-    // If Playwright got results, return them
-    const validResults = results.filter(r => !r.error || r.content)
-    if (validResults.length > 0) {
-      console.log(`Playwright succeeded: ${validResults.length} pages crawled`)
-      return results
-    }
-
-    // If Playwright failed completely, fall back to fetch
-    console.log('Playwright failed, falling back to fetch-based crawler...')
-  } catch (error: any) {
-    console.log('Playwright error, falling back to fetch:', error.message)
-  }
-
-  // Fall back to fetch-based scraper
-  const scraper = new WebsiteScraper(maxPages, crawlSubpages)
+  const scraper = new PlaywrightScraper(maxPages, crawlSubpages)
   return scraper.crawlWebsite(url)
 }

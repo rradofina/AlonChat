@@ -33,12 +33,8 @@ export function PaginationControls({
   itemLabel = 'item'
 }: PaginationControlsProps) {
   if (!showPagination && totalItems > 0) {
-    // Show only item count when pagination is hidden
-    return (
-      <div className="flex justify-between items-center mt-6 text-sm text-gray-600">
-        <span>{totalItems} {itemLabel}{totalItems !== 1 ? 's' : ''}</span>
-      </div>
-    )
+    // Don't show anything when pagination is hidden
+    return null
   }
 
   if (totalItems === 0) {

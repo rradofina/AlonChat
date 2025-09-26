@@ -462,5 +462,100 @@ if (untrainedIds.length > 0) {
 
 ---
 
-*Last Updated: January 25, 2025 - Added Issue #10: Refactoring Inline Editing to Viewer Pattern*
+## Issue #11: Jest Worker Crashes on Windows + OneDrive + Next.js 15
+
+### Symptoms
+- "Jest worker encountered 2 child process exceptions, exceeding retry limit" error
+- Multiple node.exe zombie processes (20+ processes, using 3GB+ RAM)
+- Next.js dev server crashes and restarts infinitely
+- Webpack compilation never completes
+- App stuck loading forever at localhost:3000
+
+### Root Cause
+**CRITICAL: Project location in OneDrive causes file locking conflicts**
+1. **OneDrive Sync Conflicts**: Files in `D:\Users\Raymond\OneDrive\` are constantly synced, causing file locks
+2. **Jest Worker Process Accumulation**: Next.js 15 uses jest-worker for parallel compilation, creates zombie processes on Windows
+3. **Known Next.js 15 Bug**: [GitHub Issue #23519](https://github.com/vercel/next.js/issues/23519) - Windows-specific infinite worker spawning
+4. **Memory Exhaustion**: Each crash leaves zombie processes consuming memory until system runs out
+
+### Solution - Comprehensive Windows Fix
+**Applied Configuration Changes:**
+
+1. **Created .env.development.local**:
+```env
+NODE_OPTIONS=--max-old-space-size=4096 --unhandled-rejections=strict
+WATCHPACK_POLLING=true
+NEXT_DISABLE_SWC_WASM_FALLBACK=1
+NEXT_PRIVATE_WORKER_THREADS=false
+CHOKIDAR_USEPOLLING=true
+WATCHPACK_POLLING_INTERVAL=100
+```
+
+2. **Updated next.config.js**:
+```javascript
+// Completely disable parallel processing
+config.parallelism = 1
+config.cache = false // OneDrive causes cache corruption
+
+// Windows file watching
+config.watchOptions = {
+  poll: true,
+  aggregateTimeout: 500,
+  followSymlinks: false
+}
+
+// Disable all experiments causing issues
+config.experiments = {
+  layers: false,
+  lazyCompilation: false,
+  outputModule: false
+}
+```
+
+3. **Added Windows-specific npm scripts**:
+```json
+"dev:windows": "taskkill /F /IM node.exe 2>nul & set NODE_OPTIONS=--max-old-space-size=4096 && next dev",
+"dev:safe": "set NEXT_PRIVATE_WORKER_THREADS=false && set NODE_OPTIONS=--max-old-space-size=4096 && next dev",
+"clean:all": "taskkill /F /IM node.exe 2>nul & rmdir /s /q .next 2>nul & del /q tsconfig.tsbuildinfo 2>nul"
+```
+
+### PERMANENT Solution Options
+1. **MOVE PROJECT OUT OF ONEDRIVE** (Recommended):
+   - Move to `C:\Projects\AlonChat` or any non-synced location
+   - OneDrive file locking is incompatible with webpack's file watching
+
+2. **Use WSL2 (Windows Subsystem for Linux)**:
+   - Completely avoids Windows file system issues
+   - Better performance for Node.js development
+
+3. **Downgrade to Next.js 14.2.x**:
+   - More stable on Windows
+   - Less aggressive worker spawning
+
+### Emergency Recovery
+```bash
+# When completely stuck
+taskkill /F /IM node.exe
+rmdir /s /q .next
+rmdir /s /q node_modules\.cache
+npm run dev:windows
+```
+
+### Prevention
+- **DO NOT** develop Next.js projects in OneDrive/Dropbox/Google Drive folders
+- Use `npm run dev:windows` instead of `npm run dev` on Windows
+- Regularly check for zombie processes: `tasklist | findstr node`
+- Add project folder to Windows Defender exclusions
+
+### Files Affected
+- `.env.development.local` - Windows-specific environment variables
+- `next.config.js` - Webpack configuration for Windows
+- `package.json` - Windows-specific scripts
+
+### Time Wasted
+**~10 attempts over multiple sessions** trying band-aid fixes before identifying OneDrive as root cause
+
+---
+
+*Last Updated: January 26, 2025 - Added Issue #11: Jest Worker Crashes on Windows + OneDrive + Next.js 15*
 *Remember to update this file when encountering issues that take multiple attempts to resolve!*

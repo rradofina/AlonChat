@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, Type, Bold, Italic, List, ListOrdered, Link, Smile, Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
+import { RichTextEditor } from '@/components/ui/rich-text-editor'
 
 interface QAPair {
   id: string
@@ -63,16 +64,6 @@ export function QASourceInput({ onAddSource }: QASourceInputProps) {
     setQaPairs([{ id: '1', question: '', answer: '' }])
   }
 
-  const formatButtons = [
-    { icon: Type, action: 'text', label: 'Text' },
-    { icon: Bold, action: 'bold', label: 'Bold' },
-    { icon: Italic, action: 'italic', label: 'Italic' },
-    { icon: List, action: 'bullet', label: 'Bullet List' },
-    { icon: ListOrdered, action: 'number', label: 'Numbered List' },
-    { icon: Link, action: 'link', label: 'Link' },
-    { icon: Smile, action: 'emoji', label: 'Emoji' },
-  ]
-
   const hasValidContent = title.trim() && qaPairs.some(qa => qa.question.trim() && qa.answer.trim())
 
   return (
@@ -123,33 +114,14 @@ export function QASourceInput({ onAddSource }: QASourceInputProps) {
             {/* Answer */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Answer</label>
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
-                {/* Toolbar */}
-                <div className="flex items-center gap-1 p-2 border-b border-gray-200 bg-gray-50">
-                  {formatButtons.map((button) => {
-                    const Icon = button.icon
-                    return (
-                      <button
-                        key={button.action}
-                        className="p-1.5 text-gray-600 hover:bg-gray-200 rounded"
-                        title={button.label}
-                      >
-                        <Icon className="h-4 w-4" />
-                      </button>
-                    )
-                  })}
-                  <div className="ml-auto text-xs text-gray-500 px-2">
-                    {qa.answer.length > 0 && `${new Blob([qa.answer]).size} B`}
-                  </div>
-                </div>
-
-                {/* Text area */}
-                <textarea
-                  value={qa.answer}
-                  onChange={(e) => updateQAPair(qa.id, 'answer', e.target.value)}
-                  placeholder="Enter your answer..."
-                  className="w-full px-4 py-3 min-h-[120px] resize-none focus:outline-none"
-                />
+              <RichTextEditor
+                value={qa.answer}
+                onChange={(value) => updateQAPair(qa.id, 'answer', value)}
+                placeholder="Enter your answer with formatting, links, and emojis..."
+                minHeight="min-h-[150px]"
+              />
+              <div className="text-right text-xs text-gray-500 mt-1">
+                {qa.answer.length > 0 && `${new Blob([qa.answer]).size} B`}
               </div>
             </div>
           </div>

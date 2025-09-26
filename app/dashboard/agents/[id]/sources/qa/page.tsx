@@ -21,6 +21,7 @@ import { FloatingActionBar } from '@/components/ui/floating-action-bar'
 import { Checkbox } from '@/components/ui/checkbox'
 import { usePagination } from '@/hooks/usePagination'
 import { PaginationControls } from '@/components/ui/pagination-controls'
+import { QAViewer } from '@/components/agents/qa-viewer'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -51,6 +52,7 @@ export default function QAPage() {
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('Default')
+  const [viewingQA, setViewingQA] = useState<any | null>(null)
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     isOpen: boolean
     sourceIds: string[]
@@ -299,6 +301,58 @@ export default function QAPage() {
   })
 
   const allPageSelected = currentSources.length > 0 && currentSources.every(source => selectedSources.includes(source.id))
+
+  // Functions for viewing Q&A items
+  const openQAViewer = (qa: any) => {
+    // Ensure agent_id is set for the viewer
+    setViewingQA({ ...qa, agent_id: params.id })
+  }
+
+  const handleQAUpdate = () => {
+    setShowRetrainingAlert(true)
+    setRefreshTrigger(prev => prev + 1)
+  }
+
+  const handleQADelete = async (id: string) => {
+    try {
+      const response = await fetch(`/api/agents/${params.id}/sources/qa`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceIds: [id] }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to delete Q&A')
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Q&A pair deleted successfully',
+      })
+
+      setViewingQA(null)
+      setShowRetrainingAlert(true)
+      setRefreshTrigger(prev => prev + 1)
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete Q&A',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  // Show QAViewer when viewing a Q&A item
+  if (viewingQA) {
+    return (
+      <QAViewer
+        qa={viewingQA}
+        onBack={() => setViewingQA(null)}
+        onDelete={handleQADelete}
+        onUpdate={handleQAUpdate}
+      />
+    )
+  }
 
   return (
     <div className="flex h-full min-h-full bg-white">
@@ -616,7 +670,7 @@ export default function QAPage() {
                               <DropdownMenuItem
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  // TODO: Open edit view
+                                  openQAViewer(source)
                                 }}
                               >
                                 <Edit className="h-4 w-4 mr-2" />
@@ -670,7 +724,7 @@ export default function QAPage() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation()
-                              // TODO: Open viewer
+                              openQAViewer(source)
                             }}
                             className="p-1 hover:bg-gray-100 rounded transition-colors"
                             title="View details"

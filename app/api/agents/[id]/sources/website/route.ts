@@ -181,9 +181,14 @@ async function processWebsiteDirectly(
 
   try {
     console.log(`Starting direct crawl for ${url}`)
+    console.log(`Settings: maxPages=${maxPages}, crawlSubpages=${crawlSubpages}`)
 
     // Crawl website
     const crawlResults = await scrapeWebsite(url, maxPages, crawlSubpages)
+    console.log(`Crawl results: ${crawlResults.length} pages`)
+    crawlResults.forEach(r => {
+      console.log(`- ${r.url}: ${r.error ? `ERROR: ${r.error}` : `${r.content?.length || 0} chars`}`)
+    })
 
     // Update pages crawled count with crawled pages list
     const crawledPages = crawlResults.filter(r => !r.error).map(r => r.url)
@@ -194,8 +199,32 @@ async function processWebsiteDirectly(
 
     // Process and chunk content
     const validPages = crawlResults.filter(r => !r.error && r.content)
+
+    // Even if no valid pages, update the source with the attempted crawl
     if (validPages.length === 0) {
-      throw new Error('No valid pages found to process')
+      console.log('No valid pages found, marking as ready with 0 pages')
+
+      await supabase
+        .from('sources')
+        .update({
+          status: 'ready',
+          size_kb: 0,
+          chunk_count: 0,
+          metadata: {
+            url,
+            crawl_subpages: crawlSubpages,
+            max_pages: maxPages,
+            pages_crawled: 0,
+            crawled_pages: [],
+            crawl_errors: crawlErrors,
+            total_chunks: 0,
+            crawl_completed_at: new Date().toISOString()
+          },
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', sourceId)
+
+      return // Exit early but don't throw error
     }
 
     console.log(`Processing ${validPages.length} pages`)
@@ -258,12 +287,23 @@ async function processWebsiteDirectly(
   } catch (error: any) {
     console.error(`Error processing website:`, error)
 
-    // Update source status to error
+    // Update source status to ready but with error info
     await supabase
       .from('sources')
       .update({
-        status: 'error',
-        error_message: error.message,
+        status: 'ready',
+        size_kb: 0,
+        chunk_count: 0,
+        metadata: {
+          url,
+          crawl_subpages: crawlSubpages,
+          max_pages: maxPages,
+          pages_crawled: 0,
+          crawled_pages: [],
+          crawl_errors: [{ url, error: error.message || 'Failed to crawl' }],
+          error_message: error.message || 'Failed to crawl website',
+          crawl_completed_at: new Date().toISOString()
+        },
         updated_at: new Date().toISOString()
       })
       .eq('id', sourceId)
