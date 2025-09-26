@@ -51,6 +51,7 @@ export async function POST(
     let context = ''
     let contextChunks: any[] = []
     let ragEnabled = validatedData.useRAG
+    let qaImages: string[] = []
 
     // Check if agent has embeddings
     if (ragEnabled) {
@@ -91,13 +92,14 @@ export async function POST(
               if (sourceChunk) {
                 const { data: source } = await supabase
                   .from('sources')
-                  .select('name, type')
+                  .select('name, type, metadata')
                   .eq('id', sourceChunk.source_id)
                   .single()
 
                 return {
                   ...chunk,
                   source: source,
+                  sourceMetadata: source?.metadata,
                   position: sourceChunk.position
                 }
               }
@@ -109,6 +111,17 @@ export async function POST(
           context = chunksWithSources.map((chunk: any, index) => {
             const sourceName = chunk.source?.name || 'Unknown'
             const sourceType = chunk.source?.type || 'unknown'
+
+            // Collect images from Q&A sources
+            if (sourceType === 'qa' && chunk.sourceMetadata?.images?.length > 0) {
+              // Add unique images (avoid duplicates)
+              chunk.sourceMetadata.images.forEach((img: string) => {
+                if (!qaImages.includes(img)) {
+                  qaImages.push(img)
+                }
+              })
+            }
+
             return `[Context ${index + 1} - ${sourceName} (${sourceType}), Relevance: ${(chunk.similarity * 100).toFixed(1)}%]\n${chunk.content}`
           }).join('\n\n')
 
@@ -316,6 +329,7 @@ export async function POST(
 
     return NextResponse.json({
       response,
+      images: qaImages, // Include Q&A images if found
       sessionId,
       tokensUsed,
       ragEnabled,

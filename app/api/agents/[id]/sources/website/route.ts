@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { queueWebsiteCrawl, getJobStatus } from '@/lib/queue/website-processor'
-import { scrapeWebsite } from '@/lib/sources/website-scraper'
+import { scrapeWebsite, CrawlProgress } from '@/lib/sources/website-scraper'
 import { ChunkManager } from '@/lib/services/chunk-manager'
+
+// Store progress in memory (in production, use Redis or similar)
+const crawlProgress = new Map<string, CrawlProgress>()
 
 export async function POST(
   request: NextRequest,
@@ -140,22 +143,28 @@ export async function GET(
       return NextResponse.json({ sources: [] })
     }
 
-    // Format for frontend
-    const formattedSources = sources.map(source => ({
-      id: source.id,
-      agent_id: source.agent_id,
-      type: 'website',
-      name: source.name,
-      url: source.website_url,
-      status: source.status,
-      pages_crawled: source.metadata?.pages_crawled || 0,
-      max_pages: source.metadata?.max_pages || 10,
-      crawl_subpages: source.metadata?.crawl_subpages || false,
-      chunk_count: source.chunk_count || 0,
-      is_trained: source.is_trained || false,
-      created_at: source.created_at,
-      metadata: source.metadata
-    }))
+    // Format for frontend with progress information
+    const formattedSources = sources.map(source => {
+      // Check if this source has active crawl progress
+      const progress = crawlProgress.get(source.id)
+
+      return {
+        id: source.id,
+        agent_id: source.agent_id,
+        type: 'website',
+        name: source.name,
+        url: source.website_url,
+        status: source.status,
+        pages_crawled: source.metadata?.pages_crawled || 0,
+        max_pages: source.metadata?.max_pages || 10,
+        crawl_subpages: source.metadata?.crawl_subpages || false,
+        chunk_count: source.chunk_count || 0,
+        is_trained: source.is_trained || false,
+        created_at: source.created_at,
+        metadata: source.metadata,
+        progress: progress || null // Include progress if available
+      }
+    })
 
     return NextResponse.json({ sources: formattedSources })
 
@@ -183,12 +192,21 @@ async function processWebsiteDirectly(
     console.log(`Starting direct crawl for ${url}`)
     console.log(`Settings: maxPages=${maxPages}, crawlSubpages=${crawlSubpages}`)
 
-    // Crawl website
-    const crawlResults = await scrapeWebsite(url, maxPages, crawlSubpages)
+    // Progress callback to store in memory
+    const progressCallback = (progress: CrawlProgress) => {
+      crawlProgress.set(sourceId, progress)
+      console.log(`Progress [${sourceId}]: ${progress.phase} - ${progress.current}/${progress.total} - ${progress.currentUrl}`)
+    }
+
+    // Crawl website with progress tracking
+    const crawlResults = await scrapeWebsite(url, maxPages, crawlSubpages, progressCallback)
     console.log(`Crawl results: ${crawlResults.length} pages`)
     crawlResults.forEach(r => {
       console.log(`- ${r.url}: ${r.error ? `ERROR: ${r.error}` : `${r.content?.length || 0} chars`}`)
     })
+
+    // Clean up progress after completion
+    crawlProgress.delete(sourceId)
 
     // Update pages crawled count with crawled pages list
     const crawledPages = crawlResults.filter(r => !r.error).map(r => r.url)
@@ -202,7 +220,11 @@ async function processWebsiteDirectly(
 
     // Even if no valid pages, update the source with the attempted crawl
     if (validPages.length === 0) {
-      console.log('No valid pages found, marking as ready with 0 pages')
+      console.log('No valid pages found, marking as ready with attempted URLs')
+
+      // For individual link mode, still show the main URL as "crawled"
+      // This allows users to see and click through to the website details
+      const attemptedUrls = crawlSubpages ? [] : [url]
 
       await supabase
         .from('sources')
@@ -214,8 +236,8 @@ async function processWebsiteDirectly(
             url,
             crawl_subpages: crawlSubpages,
             max_pages: maxPages,
-            pages_crawled: 0,
-            crawled_pages: [],
+            pages_crawled: attemptedUrls.length,
+            crawled_pages: attemptedUrls, // Store main URL for individual mode
             crawl_errors: crawlErrors,
             total_chunks: 0,
             crawl_completed_at: new Date().toISOString()

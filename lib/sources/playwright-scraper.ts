@@ -10,16 +10,29 @@ export interface CrawlResult {
   error?: string
 }
 
+export interface CrawlProgress {
+  current: number
+  total: number
+  currentUrl: string
+  phase: 'discovering' | 'processing'
+}
+
 export class PlaywrightScraper {
   private maxPages: number
   private crawlSubpages: boolean
   private crawledUrls: Set<string> = new Set()
   private domain: string = ''
   private browser: Browser | null = null
+  private onProgress?: (progress: CrawlProgress) => void
 
-  constructor(maxPages: number = 10, crawlSubpages: boolean = true) {
+  constructor(maxPages: number = 10, crawlSubpages: boolean = true, onProgress?: (progress: CrawlProgress) => void) {
     this.maxPages = maxPages
     this.crawlSubpages = crawlSubpages
+    this.onProgress = onProgress
+  }
+
+  setProgressCallback(callback: (progress: CrawlProgress) => void) {
+    this.onProgress = callback
   }
 
   async crawlWebsite(startUrl: string): Promise<CrawlResult[]> {
@@ -49,6 +62,16 @@ export class PlaywrightScraper {
         args: ['--no-sandbox', '--disable-setuid-sandbox']
       })
 
+      // Report initial progress
+      if (this.onProgress) {
+        this.onProgress({
+          current: 0,
+          total: this.maxPages,
+          currentUrl: startUrl,
+          phase: 'discovering'
+        })
+      }
+
       while (urlQueue.length > 0 && results.length < this.maxPages) {
         const currentUrl = urlQueue.shift()!
 
@@ -58,9 +81,20 @@ export class PlaywrightScraper {
 
         this.crawledUrls.add(currentUrl)
 
-        // Add delay to respect rate limits
+        // Add human-like random delay (500-750ms) to respect rate limits
         if (results.length > 0) {
-          await this.delay(1000)
+          const randomDelay = 500 + Math.random() * 250
+          await this.delay(randomDelay)
+        }
+
+        // Report progress
+        if (this.onProgress) {
+          this.onProgress({
+            current: results.length + 1,
+            total: this.maxPages,
+            currentUrl,
+            phase: 'processing'
+          })
         }
 
         const result = await this.crawlPage(currentUrl)
@@ -121,7 +155,7 @@ export class PlaywrightScraper {
 
       // Navigate to the page
       const response = await page.goto(url, {
-        waitUntil: 'domcontentloaded',
+        waitUntil: 'networkidle',
         timeout: 30000
       })
 
@@ -134,8 +168,14 @@ export class PlaywrightScraper {
         throw new Error(`HTTP ${status}`)
       }
 
-      // Wait a bit for JavaScript to render
-      await page.waitForTimeout(2000)
+      // Wait for network to be idle (no requests for 500ms)
+      // This is smarter than fixed wait and adapts to page speed
+      try {
+        await page.waitForLoadState('networkidle', { timeout: 5000 })
+      } catch {
+        // If networkidle times out, continue anyway
+        console.log(`Network idle timeout for ${url}, continuing...`)
+      }
 
       // Get the page content
       const html = await page.content()
@@ -269,8 +309,9 @@ export class PlaywrightScraper {
 export async function scrapeWebsiteWithPlaywright(
   url: string,
   maxPages: number = 10,
-  crawlSubpages: boolean = true
+  crawlSubpages: boolean = true,
+  onProgress?: (progress: CrawlProgress) => void
 ): Promise<CrawlResult[]> {
-  const scraper = new PlaywrightScraper(maxPages, crawlSubpages)
+  const scraper = new PlaywrightScraper(maxPages, crawlSubpages, onProgress)
   return scraper.crawlWebsite(url)
 }

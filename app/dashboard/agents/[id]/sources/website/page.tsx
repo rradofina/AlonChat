@@ -642,13 +642,14 @@ export default function WebsitePage() {
                 {currentSources.map((source, index) => {
                   const isExpanded = expandedSources.has(source.id)
                   const isEditing = editingSource === source.id
-                  const subLinks = source.metadata?.crawl_errors ? [] :
-                    (source.sub_links ||
-                     (source.metadata?.crawled_pages || []).map((url: string) => ({
-                       url,
-                       status: 'included' as const,
-                       crawled: true
-                     })))
+
+                  // Get crawled pages from metadata
+                  const crawledPages = source.metadata?.crawled_pages || []
+                  const subLinks = crawledPages.map((url: string) => ({
+                    url,
+                    status: 'included' as const,
+                    crawled: true
+                  }))
 
                   // Always show chevron for website sources
                   const hasSubLinks = true
@@ -673,7 +674,17 @@ export default function WebsitePage() {
 
                           <Globe className="h-5 w-5 text-gray-400 mt-0.5" />
 
-                          <div className="flex-1">
+                          <div
+                            className="flex-1"
+                            style={{ cursor: !isEditing ? 'pointer' : 'default' }}
+                            onClick={() => {
+                              if (!isEditing && source.status === 'ready') {
+                                // Navigate to website details
+                                setSelectedWebsite(source)
+                                setSelectedSubLink(null) // View main URL
+                              }
+                            }}
+                          >
                             {isEditing ? (
                               <div className="flex gap-2">
                                 <Input
@@ -698,14 +709,28 @@ export default function WebsitePage() {
                               </div>
                             ) : (
                               <>
-                                <p className="text-sm font-medium text-gray-900">
+                                <p className="text-sm font-medium text-gray-900 hover:text-blue-600 transition-colors">
                                   {source.url}
                                 </p>
                                 <div className="flex items-center gap-2 mt-1">
                                   {(source.status === 'pending' || source.status === 'processing') && (
                                     <span className="text-xs text-gray-600 flex items-center gap-1">
                                       <Loader2 className="h-3 w-3 animate-spin" />
-                                      Crawling in-progress
+                                      {source.progress ? (
+                                        <>
+                                          {source.progress.phase === 'discovering'
+                                            ? 'Discovering links...'
+                                            : `Processing page ${source.progress.current} of ${source.progress.total}...`
+                                          }
+                                        </>
+                                      ) : (
+                                        'Crawling in-progress'
+                                      )}
+                                    </span>
+                                  )}
+                                  {source.progress && source.progress.currentUrl && (
+                                    <span className="text-xs text-gray-400 truncate max-w-[200px]" title={source.progress.currentUrl}>
+                                      {new URL(source.progress.currentUrl).pathname}
                                     </span>
                                   )}
                                   {source.status === 'ready' && (
@@ -807,7 +832,7 @@ export default function WebsitePage() {
                             {subLinks && subLinks.length > 0 ? (
                               <>
                                 <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
-                                  {subLinks.length} LINKS INCLUDED
+                                  {subLinks.length === 1 ? '1 LINK' : `${subLinks.length} LINKS INCLUDED`}
                                 </p>
                                 {subLinks.map((link: SubLink, index: number) => {
                                   const linkId = `${source.id}-${index}`

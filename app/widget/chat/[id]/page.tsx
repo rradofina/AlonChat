@@ -8,6 +8,7 @@ interface Message {
   content: string
   role: 'user' | 'assistant'
   timestamp: Date
+  images?: string[]
 }
 
 export default function WidgetChatPage({ params }: { params: { id: string } }) {
@@ -84,7 +85,8 @@ export default function WidgetChatPage({ params }: { params: { id: string } }) {
         id: Date.now().toString(),
         content: data.response,
         role: 'assistant',
-        timestamp: new Date()
+        timestamp: new Date(),
+        images: data.images || []
       }
 
       setMessages(prev => [...prev, assistantMessage])
@@ -171,6 +173,21 @@ export default function WidgetChatPage({ params }: { params: { id: string } }) {
                 >
                   {message.content}
                 </div>
+                {/* Display images if present */}
+                {message.images && message.images.length > 0 && (
+                  <div className="mt-2 space-y-2">
+                    {message.images.map((imageUrl, idx) => (
+                      <img
+                        key={idx}
+                        src={imageUrl}
+                        alt={`Attachment ${idx + 1}`}
+                        className="rounded-lg max-w-full cursor-pointer hover:opacity-90 transition-opacity"
+                        style={{ maxHeight: '300px' }}
+                        onClick={() => window.open(imageUrl, '_blank')}
+                      />
+                    ))}
+                  </div>
+                )}
                 <div className={`text-xs text-gray-400 mt-1 ${
                   message.role === 'user' ? 'text-right' : 'text-left'
                 }`}>

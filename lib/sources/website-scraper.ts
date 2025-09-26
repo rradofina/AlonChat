@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio'
-import { scrapeWebsiteWithPlaywright } from './playwright-scraper'
+import { scrapeWebsiteWithPlaywright, CrawlProgress } from './playwright-scraper'
 
 export interface CrawlResult {
   url: string
@@ -9,6 +9,8 @@ export interface CrawlResult {
   images: string[]
   error?: string
 }
+
+export { CrawlProgress }
 
 export class WebsiteScraper {
   private maxPages: number
@@ -59,14 +61,16 @@ export class WebsiteScraper {
 
       // Add subpages to queue if enabled
       if (this.crawlSubpages && !result.error) {
-        const subpages = result.links.filter(link => {
-          try {
-            const url = new URL(link)
-            return url.hostname === this.domain && !this.crawledUrls.has(link)
-          } catch {
-            return false
-          }
-        })
+        const subpages = result.links
+          .filter(link => this.isValidCrawlUrl(link))
+          .filter(link => {
+            try {
+              const url = new URL(link)
+              return url.hostname === this.domain && !this.crawledUrls.has(link)
+            } catch {
+              return false
+            }
+          })
 
         urlQueue.push(...subpages.slice(0, this.maxPages - results.length))
       }
@@ -208,11 +212,47 @@ export class WebsiteScraper {
 
   private normalizeUrl(url: string): string {
     try {
-      const normalized = new URL(url)
+      // Add https:// if no protocol is specified
+      let urlToNormalize = url
+      if (!url.match(/^https?:\/\//i)) {
+        urlToNormalize = 'https://' + url
+      }
+
+      const normalized = new URL(urlToNormalize)
       // Remove trailing slash
       return normalized.toString().replace(/\/$/, '')
     } catch {
       return url
+    }
+  }
+
+  private isValidCrawlUrl(url: string): boolean {
+    try {
+      const parsedUrl = new URL(url)
+      const path = parsedUrl.pathname.toLowerCase()
+
+      // Skip non-HTML resources
+      const skipExtensions = [
+        '.pdf', '.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp',
+        '.mp4', '.mp3', '.wav', '.avi', '.mov',
+        '.zip', '.rar', '.tar', '.gz',
+        '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+        '.css', '.js', '.json', '.xml', '.txt', '.csv'
+      ]
+
+      if (skipExtensions.some(ext => path.endsWith(ext))) {
+        return false
+      }
+
+      // Skip common non-content paths
+      const skipPaths = ['/api/', '/assets/', '/static/', '/download/', '/files/']
+      if (skipPaths.some(skip => path.includes(skip))) {
+        return false
+      }
+
+      return true
+    } catch {
+      return false
     }
   }
 
@@ -224,12 +264,13 @@ export class WebsiteScraper {
 export async function scrapeWebsite(
   url: string,
   maxPages: number = 10,
-  crawlSubpages: boolean = true
+  crawlSubpages: boolean = true,
+  onProgress?: (progress: CrawlProgress) => void
 ): Promise<CrawlResult[]> {
   try {
     // Try Playwright first for better success rate
     console.log('Attempting to crawl with Playwright...')
-    const results = await scrapeWebsiteWithPlaywright(url, maxPages, crawlSubpages)
+    const results = await scrapeWebsiteWithPlaywright(url, maxPages, crawlSubpages, onProgress)
 
     // If Playwright got results, return them
     const validResults = results.filter(r => !r.error || r.content)
@@ -244,7 +285,7 @@ export async function scrapeWebsite(
     console.log('Playwright error, falling back to fetch:', error.message)
   }
 
-  // Fall back to fetch-based scraper
+  // Fall back to fetch-based scraper (no progress support in fallback)
   const scraper = new WebsiteScraper(maxPages, crawlSubpages)
   return scraper.crawlWebsite(url)
 }
