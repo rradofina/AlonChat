@@ -942,14 +942,14 @@ export default function WebsitePage() {
                                     </span>
                                   )}
                                 </p>
-                                <div className="max-h-64 overflow-y-auto pr-2 border border-gray-200 rounded-md bg-gray-50 p-2">
+                                <div className="max-h-64 overflow-y-auto overflow-x-hidden border border-gray-200 rounded-md bg-gray-50 p-2">
                                   <div className="space-y-1">
                                     {subLinks.map((link: SubLink, index: number) => {
                                   const linkId = `${source.id}-${index}`
                                   return (
                                     <div key={index} className="flex items-center justify-between py-1 hover:bg-white rounded px-2 group">
-                                      <div className="flex-1 flex items-center gap-2 min-w-0">
-                                        <span className="text-sm text-gray-700 truncate block" title={link.url}>
+                                      <div className="flex-1 flex items-center gap-2 min-w-0 overflow-hidden">
+                                        <span className="text-sm text-gray-700 truncate block max-w-full" title={link.url}>
                                           {link.url}
                                         </span>
                                         {/* Show status badge */}
@@ -964,7 +964,7 @@ export default function WebsitePage() {
                                         )}
                                       </div>
 
-                                      <div className="flex items-center gap-1">
+                                      <div className="flex items-center gap-1 flex-shrink-0">
                                         {/* Sub-link Actions Menu */}
                                         <div className="relative dropdown-menu">
                                           <button

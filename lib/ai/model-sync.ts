@@ -22,9 +22,47 @@ interface ModelDefinition {
   is_active?: boolean
 }
 
-// Production-ready model definitions with latest models
+// Production-ready model definitions with latest models (December 2024)
 const MODEL_REGISTRY: ModelDefinition[] = [
-  // OpenAI Models
+  // OpenAI Models - Latest December 2024
+  {
+    name: 'o1',
+    display_name: 'O1 (Full)',
+    model_id: 'o1-2024-12-17',
+    provider: 'openai',
+    context_window: 200000,
+    max_tokens: 100000,
+    description: 'Advanced reasoning model for complex tasks, math, and coding',
+    capabilities: {
+      vision: true,
+      function_calling: true,
+      json_mode: true,
+      streaming: false
+    },
+    pricing: {
+      input_per_million: 15,
+      output_per_million: 60
+    }
+  },
+  {
+    name: 'o1-mini',
+    display_name: 'O1 Mini',
+    model_id: 'o1-mini-2024-09-12',
+    provider: 'openai',
+    context_window: 128000,
+    max_tokens: 65536,
+    description: 'Faster reasoning model optimized for coding and STEM',
+    capabilities: {
+      vision: false,
+      function_calling: true,
+      json_mode: true,
+      streaming: false
+    },
+    pricing: {
+      input_per_million: 3,
+      output_per_million: 12
+    }
+  },
   {
     name: 'gpt-4o',
     display_name: 'GPT-4o',
@@ -32,7 +70,7 @@ const MODEL_REGISTRY: ModelDefinition[] = [
     provider: 'openai',
     context_window: 128000,
     max_tokens: 16384,
-    description: 'Latest flagship model with vision, function calling, and JSON mode',
+    description: 'Latest multimodal flagship with vision, audio, and function calling',
     capabilities: {
       vision: true,
       function_calling: true,
@@ -101,15 +139,15 @@ const MODEL_REGISTRY: ModelDefinition[] = [
     }
   },
 
-  // Google Models
+  // Google Models - Latest Gemini 2.0 & 2.5 (December 2024)
   {
     name: 'gemini-2.0-flash-exp',
-    display_name: 'Gemini 2.0 Flash (Experimental)',
+    display_name: 'Gemini 2.0 Flash',
     model_id: 'gemini-2.0-flash-exp',
     provider: 'google',
     context_window: 1048576,
     max_tokens: 8192,
-    description: 'Latest experimental Gemini 2.0 with multimodal native capabilities',
+    description: 'Highly efficient workhorse with native multimodal, low latency',
     capabilities: {
       vision: true,
       function_calling: true,
@@ -117,8 +155,27 @@ const MODEL_REGISTRY: ModelDefinition[] = [
       streaming: true
     },
     pricing: {
-      input_per_million: 0,  // Free during experimental phase
-      output_per_million: 0
+      input_per_million: 0.075,
+      output_per_million: 0.3
+    }
+  },
+  {
+    name: 'gemini-2.0-flash-thinking',
+    display_name: 'Gemini 2.0 Flash Thinking',
+    model_id: 'gemini-2.0-flash-thinking-exp-1219',
+    provider: 'google',
+    context_window: 1048576,
+    max_tokens: 8192,
+    description: 'Flash model with explicit reasoning traces for complex problems',
+    capabilities: {
+      vision: true,
+      function_calling: true,
+      json_mode: true,
+      streaming: true
+    },
+    pricing: {
+      input_per_million: 0.11,
+      output_per_million: 0.44
     }
   },
   {
@@ -160,15 +217,15 @@ const MODEL_REGISTRY: ModelDefinition[] = [
     }
   },
 
-  // Anthropic Models
+  // Anthropic Models - Latest December 2024
   {
     name: 'claude-3-5-sonnet',
-    display_name: 'Claude 3.5 Sonnet',
+    display_name: 'Claude 3.5 Sonnet (Latest)',
     model_id: 'claude-3-5-sonnet-20241022',
     provider: 'anthropic',
     context_window: 200000,
     max_tokens: 8192,
-    description: 'Most intelligent Claude model, outperforms Opus',
+    description: 'Most intelligent Claude model with computer use capability',
     capabilities: {
       vision: true,
       function_calling: true,
@@ -178,6 +235,25 @@ const MODEL_REGISTRY: ModelDefinition[] = [
     pricing: {
       input_per_million: 3,
       output_per_million: 15
+    }
+  },
+  {
+    name: 'claude-3-5-haiku',
+    display_name: 'Claude 3.5 Haiku',
+    model_id: 'claude-3-5-haiku-20241022',
+    provider: 'anthropic',
+    context_window: 200000,
+    max_tokens: 8192,
+    description: 'Fast, affordable Claude 3.5 with same intelligence as Claude 3 Opus',
+    capabilities: {
+      vision: true,
+      function_calling: true,
+      json_mode: false,
+      streaming: true
+    },
+    pricing: {
+      input_per_million: 1,
+      output_per_million: 5
     }
   },
   {
