@@ -154,16 +154,23 @@ export default function PlaygroundPage() {
         body: JSON.stringify({
           message: userMessage.content,
           sessionId: 'playground-session',
-          temperature,
-          model: selectedModel,
-          // The chat API will use the agent's prompt configuration
-          // We don't need to send system_prompt anymore
+          // The chat API will use the agent's configured temperature, model, and prompt
+          // These are set via the Save Configuration button
         })
       })
 
-      if (!response.ok) throw new Error('Failed to get response')
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('API Error Response:', response.status, errorText)
+        throw new Error(`API Error ${response.status}: ${errorText}`)
+      }
 
       const data = await response.json()
+      console.log('Chat API Response:', data)
+
+      if (!data.response) {
+        throw new Error('No response content received from API')
+      }
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -174,7 +181,17 @@ export default function PlaygroundPage() {
 
       setMessages(prev => [...prev, assistantMessage])
     } catch (error) {
-      toast.error('Failed to send message')
+      console.error('Failed to send message:', error)
+      toast.error(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      
+      // Add error message to chat so user can see what went wrong
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: 'Sorry, I encountered an error while processing your message. Please try again.',
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, errorMessage])
     } finally {
       setIsLoading(false)
     }
