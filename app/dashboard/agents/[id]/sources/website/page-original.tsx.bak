@@ -53,7 +53,6 @@ interface WebsiteSource {
   metadata?: any
   progress?: CrawlProgress | null
   discovered_links?: string[]
-  queue_position?: number
 }
 
 export default function WebsitePage() {
@@ -90,6 +89,8 @@ export default function WebsitePage() {
   }>({ isOpen: false, sourceIds: [], onConfirm: () => {} })
 
   // Track recently deleted items to prevent race condition with auto-refresh
+  // When an item is deleted, it's added here and filtered from all API responses
+  // This prevents deleted items from reappearing due to stale database reads
   const [recentlyDeleted, setRecentlyDeleted] = useState<Set<string>>(new Set())
 
   const handleUrlChange = (value: string) => {
@@ -485,6 +486,10 @@ export default function WebsitePage() {
     }
   }
 
+  const calculateTotalSize = () => {
+    return sources.reduce((total, source) => total + (source.pages_crawled * 25), 0) // Estimate 25KB per page
+  }
+
   const filteredSources = sources
     .filter(source => {
       if (!searchQuery) return true
@@ -614,7 +619,7 @@ export default function WebsitePage() {
                   <div className="relative">
                     <div className="flex">
                       {/* Clean Protocol Selector */}
-                      <div className="relative protocol-dropdown">
+                      <div className="relative">
                         <button
                           type="button"
                           onClick={() => setShowProtocolDropdown(!showProtocolDropdown)}

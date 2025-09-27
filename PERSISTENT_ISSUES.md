@@ -637,5 +637,138 @@ npm run dev:windows
 
 ---
 
-*Last Updated: January 26, 2025 - Added Issue #11: Jest Worker Crashes on Windows + OneDrive + Next.js 15*
+---
+
+## Issue #12: Architecture Refactoring - Phase 1 Complete, Phase 2 Pending
+
+### Date: January 27, 2025
+### Status: 🚧 IN PROGRESS (Phase 1 Complete, Phase 2 Not Started)
+
+### The Problem
+Monolithic page components with 1000+ lines of code:
+- `app/dashboard/agents/[id]/sources/website/page.tsx` - 1,272 lines
+- `app/admin/models/page.tsx` - 1,132 lines
+- `app/dashboard/agents/[id]/sources/files/page.tsx` - 923 lines
+- `app/dashboard/agents/[id]/sources/qa/page.tsx` - 815 lines
+
+### Phase 1 - COMPLETED ✅
+Built infrastructure for refactoring:
+- **EventBus** (`lib/infrastructure/events/EventBus.ts`) - Real-time event system
+- **SSE Endpoint** (`app/api/events/route.ts`) - Server-sent events
+- **RealtimeGateway** (`lib/infrastructure/realtime/RealtimeGateway.ts`) - Client SSE manager
+- **Domain Entities** (`lib/domain/sources/WebsiteSource.ts`, `lib/domain/chunks/ChunkEntity.ts`)
+- **QueueManager** (`lib/infrastructure/queue/QueueManager.ts`) - Unified queue management
+- **React Hook** (`features/website-sources/hooks/useWebsiteCrawl.ts`) - Real-time UI updates
+
+### Phase 2 - NOT STARTED ❌
+**CRITICAL**: The actual refactoring hasn't begun!
+- Monster files are still 1000+ lines
+- Business logic still mixed with UI
+- No React Query integration
+- Real-time infrastructure not connected to UI
+
+### Next Steps When Resuming
+1. **READ `REFACTOR_COMPLETE_GUIDE.md`** - Complete implementation guide
+2. Test infrastructure at `/test-realtime`
+3. Start refactoring `website/page.tsx` first
+4. Install React Query
+5. Extract components one by one
+
+### Key Files for Reference
+- `REFACTOR_COMPLETE_GUIDE.md` - Complete documentation of everything
+- `ARCHITECTURE_MIGRATION.md` - Migration strategy
+- `app/test-realtime/page.tsx` - Test the infrastructure
+
+### Recovery Instructions
+If context is lost:
+1. Read `REFACTOR_COMPLETE_GUIDE.md` completely
+2. Check TypeScript errors with `npm run typecheck`
+3. Test at http://localhost:3000/test-realtime
+4. Continue with Phase 2 checklist
+
+---
+
+## Issue #13: Windows Development Server EPIPE Errors
+
+### Date Discovered: September 27, 2025
+### Status: ⚠️ RECURRING
+
+### The Problem
+Windows development server frequently encounters EPIPE errors with Next.js:
+- `[Error: write EPIPE] { errno: -4047, code: 'EPIPE', syscall: 'write' }`
+- Jest worker exceptions
+- Server continues to work but logs are noisy
+
+### Solution
+```bash
+# Kill all Node processes
+taskkill /F /IM node.exe
+
+# Restart dev server
+npm run dev
+```
+
+### Prevention
+- Don't leave dev server running for extended periods
+- Restart after major refactoring
+
+---
+
+## Issue #14: TypeScript Errors After Refactoring
+
+### Date Discovered: September 27, 2025
+### Status: ✅ DOCUMENTED
+
+### Common Issues After Phase 2 Refactoring
+1. **CustomSelect component type mismatch**
+   - Solution: Replace with native `<select>` element
+
+2. **usePagination hook property names**
+   - Old: `paginatedItems`, `nextPage`, `prevPage`
+   - New: `currentItems`, `goToNextPage`, `goToPreviousPage`
+
+3. **FloatingActionBar props mismatch**
+   - Solution: Check actual component props, remove unused ones
+
+### Quick Fix Commands
+```bash
+# See all TypeScript errors
+npm run typecheck
+
+# Fix imports
+npm run lint -- --fix
+```
+
+---
+
+## Issue #15: Phase 2 Refactoring Completed Files
+
+### Date: September 27, 2025
+### Status: ✅ COMPLETE FOR 2 FILES
+
+### Successfully Refactored
+1. **website/page.tsx**: 1,272 → 104 lines ✅
+2. **files/page.tsx**: 923 → 95 lines ✅
+
+### Pattern Established for Remaining Files
+- qa/page.tsx (pending)
+- models/page.tsx (pending)
+
+### Recovery After Context Loss
+```bash
+# Start here
+cat MASTER_REFACTORING_DOCUMENTATION.md
+
+# Check what's done
+ls -la features/website-sources/
+ls -la features/file-sources/
+
+# Continue with
+wc -l app/dashboard/agents/[id]/sources/qa/page.tsx
+wc -l app/dashboard/agents/[id]/sources/models/page.tsx
+```
+
+---
+
+*Last Updated: September 27, 2025 - Added Issues #13-15: Phase 2 Refactoring Issues*
 *Remember to update this file when encountering issues that take multiple attempts to resolve!*

@@ -34,7 +34,6 @@ export default function QAPage() {
   const params = useParams()
   const { toast } = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const agentId = Array.isArray(params.id) ? params.id[0] : params.id
 
   // Form states
   const [title, setTitle] = useState('')
@@ -62,10 +61,10 @@ export default function QAPage() {
   }>({ isOpen: false, sourceIds: [], onConfirm: () => {} })
 
   useEffect(() => {
-    if (agentId) {
+    if (params.id) {
       fetchQASources()
     }
-  }, [agentId, refreshTrigger])
+  }, [params.id, refreshTrigger])
 
   // Cleanup previews on unmount
   useEffect(() => {
@@ -77,7 +76,7 @@ export default function QAPage() {
   const fetchQASources = async () => {
     try {
       setIsLoading(true)
-      const response = await fetch(`/api/agents/${agentId}/sources/qa`)
+      const response = await fetch(`/api/agents/${params.id}/sources/qa`)
       if (!response.ok) throw new Error('Failed to fetch Q&A sources')
       const data = await response.json()
       setQaSources(data.sources || [])
@@ -167,7 +166,7 @@ export default function QAPage() {
         formData.append('images', image)
       })
 
-      const response = await fetch(`/api/agents/${agentId}/sources/qa`, {
+      const response = await fetch(`/api/agents/${params.id}/sources/qa`, {
         method: 'POST',
         body: formData,
       })
@@ -216,7 +215,7 @@ export default function QAPage() {
       sourceName: selectedSources.length > 1 ? `${selectedSources.length} Q&A items` : undefined,
       onConfirm: async () => {
         try {
-          const response = await fetch(`/api/agents/${agentId}/sources/qa`, {
+          const response = await fetch(`/api/agents/${params.id}/sources/qa`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sourceIds: selectedSources }),
@@ -306,7 +305,7 @@ export default function QAPage() {
   // Functions for viewing Q&A items
   const openQAViewer = (qa: any) => {
     // Ensure agent_id is set for the viewer
-    setViewingQA({ ...qa, agent_id: agentId })
+    setViewingQA({ ...qa, agent_id: params.id })
   }
 
   const handleQAUpdate = () => {
@@ -316,7 +315,7 @@ export default function QAPage() {
 
   const handleQADelete = async (id: string) => {
     try {
-      const response = await fetch(`/api/agents/${agentId}/sources/qa`, {
+      const response = await fetch(`/api/agents/${params.id}/sources/qa`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sourceIds: [id] }),
@@ -377,7 +376,7 @@ export default function QAPage() {
             </div>
           )}
 
-          {/* Add Q&A Section with PROPER Design */}
+          {/* Add Q&A Section */}
           <div className="bg-gray-50 border-2 border-gray-200 border-dashed rounded-lg">
             <div className="p-8">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Add Q&A</h2>
@@ -428,7 +427,7 @@ export default function QAPage() {
                   </Button>
                 </div>
 
-                {/* Answer with Rich Text Toolbar */}
+                {/* Answer */}
                 <div>
                   <label className="text-sm text-gray-700 mb-1 block">Answer</label>
                   <div className="border border-gray-300 rounded-md bg-white">
@@ -593,7 +592,7 @@ export default function QAPage() {
               </div>
             )}
 
-              {/* Q&A Sources List */}
+              {/* Q&A Sources List - Ultra-minimal */}
               <div>
                 {isLoading ? (
                   <div className="flex items-center justify-center py-12">
@@ -687,7 +686,7 @@ export default function QAPage() {
                                     sourceName: source.title || 'this Q&A',
                                     onConfirm: async () => {
                                       try {
-                                        const response = await fetch(`/api/agents/${agentId}/sources/qa`, {
+                                        const response = await fetch(`/api/agents/${params.id}/sources/qa`, {
                                           method: 'DELETE',
                                           headers: { 'Content-Type': 'application/json' },
                                           body: JSON.stringify({ sourceIds: [source.id] }),
@@ -764,7 +763,7 @@ export default function QAPage() {
 
       {/* Right Sidebar */}
       <SourcesSidebar
-        agentId={agentId}
+        agentId={params.id as string}
         showRetrainingAlert={showRetrainingAlert}
         refreshTrigger={refreshTrigger}
       />
