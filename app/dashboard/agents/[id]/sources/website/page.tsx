@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input'
 import { useParams } from 'next/navigation'
 import { toast } from '@/components/ui/use-toast'
 import SourcesSidebar from '@/components/agents/sources-sidebar'
+import { createClient } from '@/lib/supabase/client'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -68,6 +70,7 @@ export default function WebsitePage() {
   const [sources, setSources] = useState<WebsiteSource[]>([])
   const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(false)
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
   const [maxPages, setMaxPages] = useState(200)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set())
@@ -104,14 +107,98 @@ export default function WebsitePage() {
   }
 
   useEffect(() => {
-    fetchWebsiteSources()
-    fetchAgentStatus()
+    const loadInitialData = async () => {
+      setIsInitialLoading(true)
+      await Promise.all([
+        fetchWebsiteSources(),
+        fetchAgentStatus()
+      ])
+      setIsInitialLoading(false)
+    }
+
+    loadInitialData()
+
     // Initialize queue system
     fetch('/api/init')
       .then(res => res.json())
       .then(data => console.log('Queue system:', data))
       .catch(err => console.error('Failed to initialize queue:', err))
   }, [])
+
+  // Subscribe to real-time updates for active crawls only
+  useEffect(() => {
+    const supabase = createClient()
+    const activeSources = sources.filter(s =>
+      s.status === 'pending' || s.status === 'processing' || s.status === 'queued'
+    )
+
+    // Don't subscribe if no active sources
+    if (activeSources.length === 0) return
+
+    const channels: any[] = []
+
+    activeSources.forEach(source => {
+      const channelName = `crawl-${source.id}`
+
+      // Check if already subscribed to avoid duplicates
+      const existingChannel = supabase.getChannels().find(ch => ch.topic === channelName)
+      if (existingChannel) {
+        supabase.removeChannel(existingChannel)
+      }
+
+      const channel = supabase
+        .channel(channelName)
+        .on('broadcast', { event: 'crawl_progress' }, (payload) => {
+          setSources(prevSources =>
+            prevSources.map(s => {
+              if (s.id === payload.payload.sourceId) {
+                const updatedSource = { ...s }
+
+                if (payload.payload.status === 'completed') {
+                  updatedSource.status = 'ready'
+                  updatedSource.progress = null
+                  updatedSource.pages_crawled = payload.payload.pagesProcessed || 0
+                } else if (payload.payload.status === 'failed') {
+                  updatedSource.status = 'error'
+                  updatedSource.progress = null
+                  if (payload.payload.error) {
+                    updatedSource.metadata = {
+                      ...updatedSource.metadata,
+                      error_message: payload.payload.error
+                    }
+                  }
+                } else {
+                  updatedSource.status = 'processing'
+                  updatedSource.progress = {
+                    current: payload.payload.current || 0,
+                    total: payload.payload.total || 0,
+                    currentUrl: payload.payload.currentUrl || '',
+                    phase: payload.payload.phase as any || 'processing',
+                    discoveredLinks: payload.payload.discoveredLinks || [],
+                    startTime: Date.now(),
+                    averageTimePerPage: 0
+                  }
+                }
+
+                return updatedSource
+              }
+              return s
+            })
+          )
+        })
+        .subscribe()
+
+      channels.push(channel)
+    })
+
+    // Cleanup function to properly unsubscribe
+    return () => {
+      channels.forEach(channel => {
+        channel.unsubscribe()
+        supabase.removeChannel(channel)
+      })
+    }
+  }, [sources.filter(s => s.status === 'pending' || s.status === 'processing' || s.status === 'queued').map(s => s.id).join(',')])
 
   // Auto-refresh for crawling status
   useEffect(() => {
@@ -858,7 +945,7 @@ export default function WebsitePage() {
               )}
 
               <div>
-                {isLoading ? (
+                {(isLoading || isInitialLoading) ? (
                   // Skeleton loaders for loading state
                   <div className="space-y-4">
                     {[1, 2, 3].map((i) => (
@@ -891,17 +978,45 @@ export default function WebsitePage() {
                   const crawledPages = source.metadata?.crawled_pages || []
                   const discoveredLinks = source.discovered_links || source.metadata?.discovered_links || []
 
-                  // Combine crawled and discovered links
-                  const allLinks = new Set([...crawledPages, ...discoveredLinks])
+                  // Get the root domain from the source URL
+                  const getRootDomain = (url: string) => {
+                    try {
+                      const urlObj = new URL(url)
+                      return urlObj.hostname.replace(/^www\./, '')
+                    } catch {
+                      return ''
+                    }
+                  }
+
+                  const rootDomain = getRootDomain(source.url)
+
+                  // Filter to only include same-domain links
+                  const sameDomainFilter = (url: string) => {
+                    const linkDomain = getRootDomain(url)
+                    return linkDomain === rootDomain
+                  }
+
+                  // Filter out external links
+                  const filteredCrawledPages = crawledPages.filter(sameDomainFilter)
+                  const filteredDiscoveredLinks = discoveredLinks.filter(sameDomainFilter)
+
+                  // Normalize URLs for comparison (remove trailing slashes)
+                  const normalizeUrl = (url: string) => url.replace(/\/$/, '')
+
+                  // Create a set of normalized crawled URLs for quick lookup
+                  const crawledSet = new Set(filteredCrawledPages.map(normalizeUrl))
+
+                  // Combine crawled and discovered links, removing duplicates
+                  const allLinks = new Set([...filteredCrawledPages, ...filteredDiscoveredLinks])
                   const subLinks = Array.from(allLinks).map((url: string) => ({
                     url,
                     status: 'included' as const,
-                    crawled: crawledPages.includes(url)
+                    crawled: crawledSet.has(normalizeUrl(url)) // Check if URL was actually crawled (normalized)
                   }))
 
-                  // Show chevron if crawl_subpages is true OR if discovered links exist
-                  const hasSubLinks = source.metadata?.crawl_subpages === true ||
-                                     (discoveredLinks && discoveredLinks.length > 0)
+                  // Show chevron if there are any filtered sub-links to show
+                  const hasSubLinks = subLinks.length > 1 || // More than just the main URL
+                                     (subLinks.length === 1 && subLinks[0].url !== source.url)
 
                   return (
                     <div key={source.id}>
@@ -1013,7 +1128,7 @@ export default function WebsitePage() {
                                         Ready
                                       </span>
                                       <span className="text-xs text-gray-500">
-                                        Last crawled {formatTimeAgo(source.created_at)} • Links: {source.pages_crawled || source.metadata?.pages_crawled || 0}
+                                        Last crawled {formatTimeAgo(source.created_at)} • Links: {filteredCrawledPages.length || 0}
                                       </span>
                                     </div>
                                   )}
@@ -1109,7 +1224,7 @@ export default function WebsitePage() {
                                     {subLinks.length === 1 ? '1 LINK' : `${subLinks.length} LINKS`}
                                     {source.status === 'processing' && source.progress && (
                                       <span className="text-gray-400">
-                                        ({subLinks.filter(l => l.crawled).length} crawled, {subLinks.filter(l => !l.crawled).length} pending)
+                                        ({subLinks.filter(l => l.crawled).length} crawled, {subLinks.filter(l => !l.crawled).length} discovered)
                                       </span>
                                     )}
                                   </p>
@@ -1136,7 +1251,7 @@ export default function WebsitePage() {
                                         {/* Show status badge */}
                                         {link.crawled ? (
                                           <span className="px-1.5 py-0.5 text-xs bg-green-100 text-green-800 rounded flex-shrink-0 whitespace-nowrap">
-                                            Crawled
+                                            Ready
                                           </span>
                                         ) : source.status === 'processing' ? (
                                           <span className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-700 rounded flex-shrink-0 whitespace-nowrap flex items-center gap-1">
@@ -1144,8 +1259,8 @@ export default function WebsitePage() {
                                             Processing
                                           </span>
                                         ) : (
-                                          <span className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded flex-shrink-0 whitespace-nowrap">
-                                            Discovered
+                                          <span className="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded flex-shrink-0 whitespace-nowrap">
+                                            Discovered Only
                                           </span>
                                         )}
                                       </div>

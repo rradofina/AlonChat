@@ -86,10 +86,11 @@ export class PlaywrightScraper {
       if (this.onProgress) {
         await this.onProgress({
           current: 0,
-          total: this.maxPages,
+          total: 1, // Start with just the initial URL
           currentUrl: startUrl,
           phase: 'discovering',
-          discoveredLinks: []
+          discoveredLinks: [],
+          queueLength: 1
         })
       }
 
@@ -112,10 +113,11 @@ export class PlaywrightScraper {
         if (this.onProgress) {
           await this.onProgress({
             current: results.length + 1,
-            total: this.maxPages,
+            total: Math.min(urlQueue.length + results.length + 1, this.maxPages),
             currentUrl,
             phase: 'processing',
-            discoveredLinks: Array.from(this.discoveredLinks)
+            discoveredLinks: Array.from(this.discoveredLinks),
+            queueLength: urlQueue.length
           })
         }
 
@@ -129,11 +131,12 @@ export class PlaywrightScraper {
         if (this.onProgress) {
           await this.onProgress({
             current: results.length,
-            total: this.maxPages,
+            total: Math.min(urlQueue.length + results.length, this.maxPages),
             currentUrl: result.url,
             phase: 'processing',
             discoveredLinks: Array.from(this.discoveredLinks),
-            completedPage: result  // Pass the completed page for immediate processing
+            completedPage: result,  // Pass the completed page for immediate processing
+            queueLength: urlQueue.length
           })
         }
 

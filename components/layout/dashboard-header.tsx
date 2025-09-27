@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useParams, useRouter } from 'next/navigation'
-import { Bot, ChevronRight, User, Settings, LogOut, Shield, Database } from 'lucide-react'
+import { Bot, ChevronRight, User, Settings, LogOut, Shield, Database, LayoutDashboard, FileText } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { isAdminEmailClient } from '@/lib/utils/admin-access'
@@ -169,6 +169,16 @@ export function DashboardHeader({ projectName, agentName }: DashboardHeaderProps
                 <div className="px-2 py-1.5">
                   <span className="text-xs text-gray-500 uppercase tracking-wider">Admin</span>
                 </div>
+
+                <DropdownMenuItem onClick={() => router.push('/admin/dashboard')}>
+                  <LayoutDashboard className="mr-2 h-4 w-4 text-red-600" />
+                  <span className="text-red-600">Admin Dashboard</span>
+                </DropdownMenuItem>
+
+                <DropdownMenuItem onClick={() => router.push('/admin/prompts')}>
+                  <FileText className="mr-2 h-4 w-4 text-red-600" />
+                  <span className="text-red-600">System Prompts</span>
+                </DropdownMenuItem>
 
                 <DropdownMenuItem onClick={() => router.push('/admin/models')}>
                   <Database className="mr-2 h-4 w-4 text-red-600" />

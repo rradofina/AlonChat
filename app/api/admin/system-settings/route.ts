@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { z } from 'zod'
 
 const SystemSettingsSchema = z.object({
-  admin_system_prompt: z.string().min(1).optional(),
+  master_system_prompt: z.string().min(1).optional(),
 })
 
 export async function GET(request: NextRequest) {
@@ -27,29 +27,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
 
-    // Get global settings
+    // Get system settings
     const { data: settings, error } = await supabase
-      .from('global_settings')
+      .from('system_settings')
       .select('*')
-      .in('key', ['admin_system_prompt'])
+      .eq('setting_key', 'master_system_prompt')
 
     if (error) {
-      console.error('Error fetching global settings:', error)
+      console.error('Error fetching system settings:', error)
       return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 })
     }
 
-    // Format settings as key-value object
-    const formattedSettings = settings?.reduce((acc, setting) => {
-      acc[setting.key] = {
-        value: setting.value,
-        description: setting.description,
-        updated_at: setting.updated_at,
-        is_sensitive: setting.is_sensitive
-      }
-      return acc
-    }, {} as Record<string, any>)
-
-    return NextResponse.json({ settings: formattedSettings || {} })
+    // Return settings as array (to match frontend expectations)
+    return NextResponse.json({ settings: settings || [] })
   } catch (error) {
     console.error('Error in GET /api/admin/system-settings:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -81,30 +71,24 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json()
     const validatedData = SystemSettingsSchema.parse(body)
 
-    // Update settings
-    const updates = []
+    // Update or insert master system prompt
+    if (validatedData.master_system_prompt !== undefined) {
+      const { error } = await supabase
+        .from('system_settings')
+        .upsert({
+          setting_key: 'master_system_prompt',
+          setting_value: validatedData.master_system_prompt,
+          setting_type: 'text',
+          category: 'prompts',
+          description: 'Master system prompt prepended to all agent conversations',
+          is_public: false,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'setting_key'
+        })
 
-    if (validatedData.admin_system_prompt !== undefined) {
-      updates.push(
-        supabase
-          .from('global_settings')
-          .upsert({
-            key: 'admin_system_prompt',
-            value: validatedData.admin_system_prompt,
-            updated_by: user.id
-          }, {
-            onConflict: 'key'
-          })
-      )
-    }
-
-    // Execute all updates
-    const results = await Promise.all(updates)
-
-    // Check for errors
-    for (const result of results) {
-      if (result.error) {
-        console.error('Error updating global settings:', result.error)
+      if (error) {
+        console.error('Error updating system settings:', error)
         return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 })
       }
     }

@@ -50,6 +50,7 @@ export function DynamicSidebar() {
   const [settingsExpanded, setSettingsExpanded] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [sourceStats, setSourceStats] = useState<any>(null)
+  const [isSetupMode, setIsSetupMode] = useState(false)
 
   const isAgentPage = pathname.includes('/dashboard/agents/')
   const agentId = params.id as string
@@ -86,16 +87,26 @@ export function DynamicSidebar() {
         .eq('id', agentId)
         .single()
         .then(({ data }) => {
-          if (data) setAgent(data)
+          if (data) {
+            setAgent(data)
+            // Agent is in setup mode if never trained
+            const isTrained = data.last_trained_at !== null || data.status === 'active'
+            setIsSetupMode(!isTrained)
+
+            // Auto-expand sources section if in setup mode
+            if (!isTrained) {
+              setSourcesExpanded(true)
+            }
+          }
         })
 
-      // Fetch source statistics if on a sources page
-      if (pathname.includes('/sources')) {
-        fetch(`/api/agents/${agentId}/sources/stats`)
-          .then(res => res.json())
-          .then(data => setSourceStats(data))
-          .catch(console.error)
-      }
+      // Fetch source statistics to check setup mode
+      fetch(`/api/agents/${agentId}/sources/stats`)
+        .then(res => res.json())
+        .then(data => {
+          setSourceStats(data)
+        })
+        .catch(console.error)
     }
   }, [isAgentPage, agentId, pathname])
 
@@ -177,20 +188,67 @@ export function DynamicSidebar() {
 
   // Agent detail navigation
   const agentNavigation = agentId ? [
-    { name: 'Playground', href: `/dashboard/agents/${agentId}/playground`, icon: Bot },
-    { name: 'Activity', href: `/dashboard/agents/${agentId}/activity`, icon: Activity, hasSubitems: true },
-    { name: 'Analytics', href: `/dashboard/agents/${agentId}/analytics`, icon: BarChart3, hasSubitems: true },
+    {
+      name: 'Playground',
+      href: `/dashboard/agents/${agentId}/playground`,
+      icon: Bot,
+      disabled: isSetupMode,
+      tooltip: isSetupMode ? 'Train your agent first to enable playground' : undefined
+    },
+    {
+      name: 'Activity',
+      href: `/dashboard/agents/${agentId}/activity`,
+      icon: Activity,
+      hasSubitems: true,
+      disabled: isSetupMode,
+      tooltip: isSetupMode ? 'Train your agent first to view activity' : undefined
+    },
+    {
+      name: 'Analytics',
+      href: `/dashboard/agents/${agentId}/analytics`,
+      icon: BarChart3,
+      hasSubitems: true,
+      disabled: isSetupMode,
+      tooltip: isSetupMode ? 'Train your agent first to view analytics' : undefined
+    },
     {
       name: 'Sources',
       href: `/dashboard/agents/${agentId}/sources`,
       icon: FileText,
       hasSubitems: true,
-      badge: sourceStats?.totalSources || 0
+      badge: sourceStats?.totalSources || 0,
+      disabled: false, // Sources always enabled
+      highlight: isSetupMode // Highlight sources in setup mode
     },
-    { name: 'Actions', href: `/dashboard/agents/${agentId}/actions`, icon: Zap },
-    { name: 'Contacts', href: `/dashboard/agents/${agentId}/contacts`, icon: Users },
-    { name: 'Deploy', href: `/dashboard/agents/${agentId}/deploy`, icon: Rocket },
-    { name: 'Settings', href: `/dashboard/agents/${agentId}/settings`, icon: Settings, hasSubitems: true },
+    {
+      name: 'Actions',
+      href: `/dashboard/agents/${agentId}/actions`,
+      icon: Zap,
+      disabled: isSetupMode,
+      tooltip: isSetupMode ? 'Train your agent first to configure actions' : undefined
+    },
+    {
+      name: 'Contacts',
+      href: `/dashboard/agents/${agentId}/contacts`,
+      icon: Users,
+      disabled: isSetupMode,
+      tooltip: isSetupMode ? 'Train your agent first to manage contacts' : undefined
+    },
+    {
+      name: 'Deploy',
+      href: `/dashboard/agents/${agentId}/deploy`,
+      icon: Rocket,
+      disabled: isSetupMode,
+      tooltip: isSetupMode ? 'Train your agent first to deploy your agent' : undefined
+    },
+    {
+      name: 'Settings',
+      href: `/dashboard/agents/${agentId}/settings`,
+      icon: Settings,
+      hasSubitems: true,
+      disabled: isSetupMode,
+      tooltip: isSetupMode ? 'Train your agent first to configure settings' : undefined
+    },
   ] : []
 
   const navigation = isAgentPage ? agentNavigation : mainNavigation
@@ -208,21 +266,36 @@ export function DynamicSidebar() {
               item.name === 'Analytics' ? analyticsExpanded :
               item.name === 'Sources' ? sourcesExpanded :
               item.name === 'Settings' ? settingsExpanded : false
+            const isDisabled = item.disabled
 
             return (
-              <div key={item.name}>
+              <div key={item.name} className="relative group">
                 {item.hasSubitems ? (
                   <>
+                    {/* Tooltip for disabled items */}
+                    {item.tooltip && (
+                      <div className="absolute left-full ml-2 top-2 z-10 hidden group-hover:block pointer-events-none">
+                        <div className="bg-gray-900 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
+                          {item.tooltip}
+                        </div>
+                      </div>
+                    )}
                     <button
                       onClick={() => {
+                        if (isDisabled) return
                         if (item.name === 'Activity') setActivityExpanded(!activityExpanded)
                         else if (item.name === 'Analytics') setAnalyticsExpanded(!analyticsExpanded)
                         else if (item.name === 'Sources') setSourcesExpanded(!sourcesExpanded)
                         else if (item.name === 'Settings') setSettingsExpanded(!settingsExpanded)
                       }}
+                      disabled={isDisabled}
                       className={cn(
                         "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-                        isActive
+                        isDisabled
+                          ? "text-gray-400 cursor-not-allowed opacity-50"
+                          : item.highlight
+                          ? "bg-blue-50 text-blue-600 border border-blue-200"
+                          : isActive
                           ? "bg-gray-100 text-gray-900"
                           : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                       )}
@@ -323,18 +396,39 @@ export function DynamicSidebar() {
                     )}
                   </>
                 ) : (
-                  <Link
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-                      isActive
-                        ? "bg-gray-100 text-gray-900"
-                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                  <>
+                    {/* Tooltip for disabled items */}
+                    {item.tooltip && (
+                      <div className="absolute left-full ml-2 top-2 z-10 hidden group-hover:block pointer-events-none">
+                        <div className="bg-gray-900 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
+                          {item.tooltip}
+                        </div>
+                      </div>
                     )}
-                  >
-                    <Icon className="h-5 w-5" />
-                    <span>{item.name}</span>
-                  </Link>
+                    {isDisabled ? (
+                      <div
+                        className="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-gray-400 cursor-not-allowed opacity-50"
+                      >
+                        <Icon className="h-5 w-5" />
+                        <span>{item.name}</span>
+                      </div>
+                    ) : (
+                      <Link
+                        href={item.href}
+                        className={cn(
+                          "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                          item.highlight
+                            ? "bg-blue-50 text-blue-600 border border-blue-200"
+                            : isActive
+                            ? "bg-gray-100 text-gray-900"
+                            : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                        )}
+                      >
+                        <Icon className="h-5 w-5" />
+                        <span>{item.name}</span>
+                      </Link>
+                    )}
+                  </>
                 )}
               </div>
             )

@@ -40,6 +40,13 @@ export interface EmbeddingResult {
   dimensions: number
 }
 
+export interface HealthCheckResult {
+  isHealthy: boolean
+  lastChecked: Date
+  error?: string
+  responseTime?: number
+}
+
 export interface AIProvider {
   name: string
   initialize(config: Record<string, any>): Promise<void>
@@ -49,4 +56,5 @@ export interface AIProvider {
   estimateCost(tokens: number, model: string): number
   embed?(options: EmbeddingOptions): Promise<EmbeddingResult>
   supportsEmbeddings?(): boolean
+  healthCheck?(): Promise<HealthCheckResult>
 }

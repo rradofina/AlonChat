@@ -18,9 +18,12 @@ import {
   EyeOff,
   Copy,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  FileText,
+  Loader2
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { configService, AIModel } from '@/lib/api/config'
 
 interface AgentSettings {
   id: string
@@ -37,6 +40,16 @@ interface AgentSettings {
   api_key?: string
 }
 
+interface PromptTemplate {
+  id: string
+  name: string
+  description: string
+  category: string
+  user_prompt: string
+  is_system: boolean
+  is_active: boolean
+}
+
 export default function SettingsPage() {
   const params = useParams()
   const agentId = params.id as string
@@ -46,11 +59,67 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('general')
   const [showApiKey, setShowApiKey] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('custom')
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([])
+  const [templatesLoading, setTemplatesLoading] = useState(true)
+  const [availableModels, setAvailableModels] = useState<AIModel[]>([])
+  const [modelsLoading, setModelsLoading] = useState(true)
   const supabase = createClient()
 
   useEffect(() => {
     loadAgent()
+    loadTemplates()
+    loadModels()
   }, [agentId])
+
+  const loadModels = async () => {
+    try {
+      setModelsLoading(true)
+      const models = await configService.getAIModels()
+      setAvailableModels(models)
+
+      // Auto-select first model if current agent has no model set
+      if (agent && !agent.model && models.length > 0) {
+        setAgent({ ...agent, model: models[0].name })
+      }
+    } catch (error) {
+      console.error('Error loading models:', error)
+      // Fall back to hardcoded models if API fails
+      setAvailableModels([
+        { id: 'gpt-4-mini', name: 'gpt-4-mini', provider: 'openai' },
+        { id: 'gpt-3.5-turbo', name: 'gpt-3.5-turbo', provider: 'openai' },
+        { id: 'claude-3-haiku', name: 'claude-3-haiku', provider: 'anthropic' }
+      ] as AIModel[])
+    } finally {
+      setModelsLoading(false)
+    }
+  }
+
+  const loadTemplates = async () => {
+    try {
+      const response = await fetch('/api/prompt-templates')
+      const data = await response.json()
+      if (data.templates) {
+        setPromptTemplates(data.templates)
+      }
+    } catch (error) {
+      console.error('Error loading templates:', error)
+      toast.error('Failed to load prompt templates')
+    } finally {
+      setTemplatesLoading(false)
+    }
+  }
+
+  const handleTemplateChange = (templateId: string) => {
+    setSelectedTemplateId(templateId)
+    if (templateId !== 'custom') {
+      const template = promptTemplates.find(t => t.id === templateId)
+      if (template && agent) {
+        setAgent({ ...agent, system_prompt: template.user_prompt })
+        toast.success(`Applied ${template.name} template`)
+      }
+    }
+  }
 
   const loadAgent = async () => {
     try {
@@ -61,10 +130,20 @@ export default function SettingsPage() {
         .single()
 
       if (data) {
-        setAgent({
+        const agentData = {
           ...data,
           api_key: data.api_key || 'sk-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
-        })
+        }
+        setAgent(agentData)
+
+        // Load models and set default if needed
+        const models = await configService.getAIModels()
+        setAvailableModels(models)
+
+        // If agent has no model set and we have models available, set the first one
+        if (!agentData.model && models.length > 0) {
+          setAgent({ ...agentData, model: models[0].name })
+        }
       }
     } catch (error) {
       console.error('Error loading agent:', error)
@@ -282,13 +361,22 @@ export default function SettingsPage() {
                       AI Model
                     </label>
                     <select
-                      value={agent.model}
+                      value={agent.model || ''}
                       onChange={(e) => setAgent({ ...agent, model: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={modelsLoading}
                     >
-                      <option value="gpt-4-mini">GPT-4 Mini</option>
-                      <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                      <option value="claude-3-haiku">Claude 3 Haiku</option>
+                      {modelsLoading ? (
+                        <option value="">Loading models...</option>
+                      ) : availableModels.length === 0 ? (
+                        <option value="">No models available</option>
+                      ) : (
+                        availableModels.map((model) => (
+                          <option key={model.id} value={model.name}>
+                            {model.name}
+                          </option>
+                        ))
+                      )}
                     </select>
                   </div>
 
@@ -345,15 +433,56 @@ export default function SettingsPage() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Prompt Template
+                    </label>
+                    <div className="mb-3">
+                      {templatesLoading ? (
+                        <div className="flex items-center justify-center py-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        </div>
+                      ) : (
+                        <>
+                          <select
+                            value={selectedTemplateId}
+                            onChange={(e) => handleTemplateChange(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="custom">Custom Prompt</option>
+                            {promptTemplates.map((template) => (
+                              <option key={template.id} value={template.id}>
+                                {template.name}
+                              </option>
+                            ))}
+                          </select>
+                          {selectedTemplateId !== 'custom' && (
+                            <p className="text-xs text-gray-500 mt-2">
+                              {promptTemplates.find(t => t.id === selectedTemplateId)?.description}
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
                       System Prompt
                     </label>
                     <textarea
                       value={agent.system_prompt || ''}
-                      onChange={(e) => setAgent({ ...agent, system_prompt: e.target.value })}
-                      rows={8}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      onChange={(e) => {
+                        setAgent({ ...agent, system_prompt: e.target.value })
+                        if (selectedTemplateId !== 'custom') {
+                          setSelectedTemplateId('custom')
+                        }
+                      }}
+                      rows={12}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
                       placeholder="Define your agent's personality, role, and behavior..."
                     />
+                    {selectedTemplateId === 'custom' && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        <FileText className="inline h-3 w-3 mr-1" />
+                        Using custom prompt - changes will override template selection
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>

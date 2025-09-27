@@ -15,6 +15,7 @@ export interface Model {
   name: string
   display_name: string
   provider: string
+  provider_logo?: string
   description?: string
   message_credits?: number
 }
@@ -28,12 +29,6 @@ interface ModelDropdownProps {
   disabled?: boolean
 }
 
-const providerIcons: Record<string, string> = {
-  openai: '🤖',
-  google: '✨',
-  anthropic: '🧠',
-  custom: '⚙️',
-}
 
 export function ModelDropdown({
   models,
@@ -61,18 +56,6 @@ export function ModelDropdown({
     )
   }, [models, search])
 
-  // Group filtered models by provider
-  const groupedModels = React.useMemo(() => {
-    const groups: Record<string, Model[]> = {}
-    filteredModels.forEach((model) => {
-      const provider = model.provider || 'other'
-      if (!groups[provider]) {
-        groups[provider] = []
-      }
-      groups[provider].push(model)
-    })
-    return groups
-  }, [filteredModels])
 
   const handleSelect = (modelName: string) => {
     console.log('Model selected:', modelName)
@@ -105,7 +88,13 @@ export function ModelDropdown({
           <div className="flex items-center gap-2 truncate">
             {selectedModel ? (
               <>
-                <span className="text-sm">{providerIcons[selectedModel.provider] || '📦'}</span>
+                {selectedModel.provider_logo && (
+                  <img
+                    src={selectedModel.provider_logo}
+                    alt={selectedModel.provider}
+                    className="h-4 w-4 object-contain"
+                  />
+                )}
                 <span className="truncate text-sm">{selectedModel.display_name}</span>
               </>
             ) : (
@@ -133,45 +122,41 @@ export function ModelDropdown({
 
           {/* Models List */}
           <div className="max-h-[300px] overflow-y-auto p-1">
-            {Object.keys(groupedModels).length === 0 ? (
+            {filteredModels.length === 0 ? (
               <div className="py-6 text-center text-sm text-muted-foreground">
                 No models found.
               </div>
             ) : (
-              Object.entries(groupedModels).map(([provider, providerModels]) => (
-                <div key={provider} className="mb-1">
-                  {/* Provider Header */}
-                  <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                    <span>{providerIcons[provider] || '📦'}</span>
-                    <span className="ml-1 uppercase">{provider}</span>
-                  </div>
-
-                  {/* Provider Models */}
-                  {providerModels.map((model) => (
-                    <button
-                      key={model.id}
-                      onClick={() => handleSelect(model.name)}
+              filteredModels.map((model) => (
+                <button
+                  key={model.id}
+                  onClick={() => handleSelect(model.name)}
+                  className={cn(
+                    'flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-sm outline-none transition-colors',
+                    'hover:bg-accent hover:text-accent-foreground cursor-pointer',
+                    value === model.name && 'bg-accent text-accent-foreground'
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <Check
                       className={cn(
-                        'flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-sm outline-none transition-colors',
-                        'hover:bg-accent hover:text-accent-foreground cursor-pointer',
-                        value === model.name && 'bg-accent text-accent-foreground'
+                        'h-4 w-4',
+                        value === model.name ? 'opacity-100' : 'opacity-0'
                       )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Check
-                          className={cn(
-                            'h-4 w-4',
-                            value === model.name ? 'opacity-100' : 'opacity-0'
-                          )}
-                        />
-                        <span>{model.display_name}</span>
-                      </div>
-                      <span className="text-xs text-muted-foreground">
-                        {model.message_credits || 1} credit
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                    />
+                    {model.provider_logo && (
+                      <img
+                        src={model.provider_logo}
+                        alt={model.provider}
+                        className="h-4 w-4 object-contain"
+                      />
+                    )}
+                    <span>{model.display_name}</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {model.message_credits || 1} credit
+                  </span>
+                </button>
               ))
             )}
           </div>

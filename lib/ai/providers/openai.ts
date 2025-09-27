@@ -1,5 +1,6 @@
 import { OpenAI } from 'openai'
-import { AIProvider, ChatCompletionOptions, ChatCompletionResult, EmbeddingOptions, EmbeddingResult } from './base'
+import { AIProvider, ChatCompletionOptions, ChatCompletionResult, EmbeddingOptions, EmbeddingResult, HealthCheckResult } from './base'
+import { sanitizeLLMOptions } from '../utils/sanitize-options'
 
 export class OpenAIProvider implements AIProvider {
   name = 'openai'
@@ -26,14 +27,17 @@ export class OpenAIProvider implements AIProvider {
       throw new Error('OpenAI provider not configured')
     }
 
+    // Sanitize and validate parameters
+    const safe = sanitizeLLMOptions(options, 'openai')
+
     const completion = await this.client.chat.completions.create({
       model: options.model,
       messages: options.messages,
-      temperature: options.temperature,
-      max_tokens: options.maxTokens,
-      top_p: options.topP,
-      frequency_penalty: options.frequencyPenalty,
-      presence_penalty: options.presencePenalty,
+      temperature: safe.temperature,
+      max_tokens: safe.maxTokens,
+      top_p: safe.topP,
+      frequency_penalty: safe.frequencyPenalty,
+      presence_penalty: safe.presencePenalty,
       stream: false
     })
 
@@ -96,6 +100,35 @@ export class OpenAIProvider implements AIProvider {
     } catch (error: any) {
       console.error('OpenAI embedding error:', error)
       throw new Error(`Embedding generation failed: ${error.message}`)
+    }
+  }
+
+  async healthCheck(): Promise<HealthCheckResult> {
+    const startTime = Date.now()
+    try {
+      if (!this.client) {
+        return {
+          isHealthy: false,
+          lastChecked: new Date(),
+          error: 'OpenAI provider not configured'
+        }
+      }
+
+      // Try a minimal API call to check connectivity
+      await this.client.models.list()
+
+      return {
+        isHealthy: true,
+        lastChecked: new Date(),
+        responseTime: Date.now() - startTime
+      }
+    } catch (error: any) {
+      return {
+        isHealthy: false,
+        lastChecked: new Date(),
+        error: error.message,
+        responseTime: Date.now() - startTime
+      }
     }
   }
 }

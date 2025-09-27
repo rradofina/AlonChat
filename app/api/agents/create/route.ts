@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { modelService } from '@/lib/services/model-service'
 import { z } from 'zod'
 
 const CreateAgentSchema = z.object({
@@ -56,6 +57,14 @@ export async function POST(request: NextRequest) {
       }
     })
 
+    // Get default model from the system
+    const defaultModel = await modelService.getDefaultModel(true)
+    if (!defaultModel) {
+      return NextResponse.json({
+        error: 'No AI models configured. Please contact administrator.'
+      }, { status: 500 })
+    }
+
     // Create agent
     const { data: agent, error: agentError } = await supabase
       .from('agents')
@@ -67,7 +76,7 @@ export async function POST(request: NextRequest) {
         status: 'training',
         total_sources: validatedData.sources.length,
         total_size_kb: Math.round(totalSizeKb),
-        model: 'gpt-3.5-turbo',
+        model: defaultModel, // Use dynamic default model
         temperature: 0.7,
         max_tokens: 500,
         system_prompt: `You are a helpful AI assistant for ${validatedData.name}. Answer questions based on the provided knowledge base.`,

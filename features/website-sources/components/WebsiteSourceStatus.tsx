@@ -46,14 +46,19 @@ export function WebsiteSourceStatus({ source }: WebsiteSourceStatusProps) {
           <span className="text-xs text-gray-600 flex items-center gap-1">
             {progress ? (
               <>
-                {progress.phase === 'discovering'
-                  ? `Discovering links... (found ${
-                      progress.discoveredLinks?.length ||
-                      source.metadata?.discovered_links?.length ||
-                      0
-                    })`
-                  : `Crawling page ${progress.current} of ${progress.total}`
-                }
+                {(() => {
+                  const discoveredCount = progress.discoveredLinks?.length ||
+                    source.metadata?.discovered_links?.length || 0
+                  const crawledCount = progress.current || 0
+                  const queuedCount = progress.queueLength || progress.total || 0
+                  const totalInProgress = crawledCount + queuedCount
+
+                  if (progress.phase === 'discovering') {
+                    return `Discovering links... (found ${discoveredCount})`
+                  }
+
+                  return `${totalInProgress} Links (${crawledCount} Crawled, ${queuedCount} Pending)`
+                })()}
               </>
             ) : (
               'Starting crawl...'

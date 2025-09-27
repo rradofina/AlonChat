@@ -3,11 +3,18 @@ import { createClient } from '@/lib/supabase/server'
 import { queueWebsiteCrawl, getJobStatus } from '@/lib/queue/website-processor'
 import { scrapeWebsite, CrawlProgress } from '@/lib/sources/website-scraper'
 import { ChunkManager } from '@/lib/services/chunk-manager'
+import {
+  sanitizeError,
+  validateCrawlUrl,
+  checkRateLimit,
+  logSecurityEvent
+} from '@/lib/utils/security'
 
 export interface ExtendedCrawlProgress extends CrawlProgress {
   discoveredLinks: string[]
   startTime?: number
   averageTimePerPage?: number
+  queueLength?: number
 }
 
 export async function POST(
@@ -19,12 +26,54 @@ export async function POST(
     const supabase = await createClient()
     const { url, crawlSubpages, maxPages, fullPageContent } = await request.json()
 
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
+    // Rate limiting
+    const rateLimit = await checkRateLimit(user.id, 10, 60000) // 10 requests per minute
+    if (!rateLimit.allowed) {
+      await logSecurityEvent({
+        type: 'rate_limit',
+        userId: user.id,
+        details: { endpoint: 'website-crawl' }
+      })
+      return NextResponse.json(
+        { error: `Rate limit exceeded. Try again in ${Math.ceil((rateLimit.resetTime - Date.now()) / 1000)} seconds` },
+        { status: 429 }
+      )
+    }
+
     if (!url) {
       return NextResponse.json(
         { error: 'URL is required' },
         { status: 400 }
       )
     }
+
+    // Validate and sanitize URL
+    const urlValidation = validateCrawlUrl(url)
+    if (!urlValidation.valid) {
+      await logSecurityEvent({
+        type: urlValidation.error?.includes('Private') || urlValidation.error?.includes('Local') ? 'ssrf_attempt' : 'invalid_url',
+        userId: user.id,
+        details: { url, error: urlValidation.error }
+      })
+      return NextResponse.json(
+        { error: urlValidation.error || 'Invalid URL' },
+        { status: 400 }
+      )
+    }
+
+    const validatedUrl = urlValidation.normalizedUrl!
+
+    // Validate maxPages
+    const safeMaxPages = Math.min(Math.max(1, maxPages || 10), 1000) // Cap at 1000 pages
 
     // Get the agent to ensure it exists and get project_id
     const { data: agent, error: agentError } = await supabase
@@ -44,16 +93,16 @@ export async function POST(
         agent_id: params.id,
         project_id: agent.project_id,
         type: 'website',
-        name: url,
-        website_url: url,
+        name: validatedUrl,
+        website_url: validatedUrl,
         size_kb: 0, // Will be updated as pages are crawled
         status: 'pending',
         is_trained: false, // Explicitly set to false - websites are not trained until training is run
         chunk_count: 0,
         metadata: {
-          url,
+          url: validatedUrl,
           crawl_subpages: crawlSubpages || false,
-          max_pages: maxPages || 10,
+          max_pages: safeMaxPages,
           pages_crawled: 0,
           crawled_pages: [],
           discovered_links: [],
@@ -78,9 +127,9 @@ export async function POST(
       sourceId: source.id,
       agentId: params.id,
       projectId: agent.project_id,
-      url,
+      url: validatedUrl,
       crawlSubpages: crawlSubpages || false,
-      maxPages: maxPages || 10
+      maxPages: safeMaxPages
     })
 
     // If queue is available, update status to queued
@@ -108,7 +157,9 @@ export async function POST(
         .eq('id', source.id)
 
       // Process in background (fire and forget)
-      processWebsiteDirectly(source.id, params.id, agent.project_id, url, crawlSubpages || false, maxPages || 10, fullPageContent || false)
+      processWebsiteDirectly(source.id, params.id, agent.project_id, validatedUrl, crawlSubpages || false, safeMaxPages, fullPageContent || false).catch(error => {
+        console.error('Background processing failed:', error)
+      })
     }
 
     // Format for frontend
@@ -135,7 +186,7 @@ export async function POST(
   } catch (error) {
     console.error('Website crawl error:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: sanitizeError(error) },
       { status: 500 }
     )
   }
@@ -192,7 +243,7 @@ export async function GET(
   } catch (error) {
     console.error('Get websites error:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: sanitizeError(error) },
       { status: 500 }
     )
   }
@@ -209,6 +260,51 @@ async function processWebsiteDirectly(
   fullPageContent: boolean = false
 ) {
   const supabase = await createClient()
+  let isTimedOut = false
+  let crawlAbortController: AbortController | null = null
+
+  // Progressive timeout strategy
+  const INITIAL_TIMEOUT = 30000 // 30 seconds per page
+  const MAX_TOTAL_TIME = 5 * 60 * 1000 // 5 minutes max
+  const startTime = Date.now()
+
+  // Set a maximum timeout
+  const crawlTimeout = setTimeout(async () => {
+    isTimedOut = true
+    console.error(`Crawl timeout for ${sourceId} after ${MAX_TOTAL_TIME / 1000} seconds`)
+
+    // Abort any ongoing operations
+    if (crawlAbortController) {
+      crawlAbortController.abort()
+    }
+
+    // Update status with timeout error
+    await supabase
+      .from('sources')
+      .update({
+        status: 'error',
+        metadata: {
+          url,
+          error_message: 'Crawl timeout - operation took too long',
+          crawl_progress: null,
+          timeout_at: new Date().toISOString()
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', sourceId)
+
+    // Send timeout notification via channel
+    await supabase.channel(`crawl-${sourceId}`).send({
+      type: 'broadcast',
+      event: 'crawl_progress',
+      payload: {
+        sourceId,
+        status: 'failed',
+        phase: 'timeout',
+        error: 'Operation timed out'
+      }
+    })
+  }, MAX_TOTAL_TIME)
 
   // Normalize URL by adding https:// if no protocol is specified
   let normalizedUrl = url
@@ -218,6 +314,11 @@ async function processWebsiteDirectly(
   }
 
   try {
+    // Check if already timed out before starting
+    if (isTimedOut) {
+      clearTimeout(crawlTimeout)
+      return
+    }
 
     console.log(`Starting direct crawl for ${normalizedUrl}`)
     console.log(`Settings: maxPages=${maxPages}, crawlSubpages=${crawlSubpages}`)
@@ -226,11 +327,35 @@ async function processWebsiteDirectly(
     let pagesProcessed = 0
     const discoveredLinks = new Set<string>()
 
-    // Progress callback to store in database
+    // Broadcast crawl started
+    await supabase.channel(`crawl-${sourceId}`).send({
+      type: 'broadcast',
+      event: 'crawl_progress',
+      payload: {
+        sourceId,
+        status: 'started',
+        phase: 'discovering',
+        current: 0,
+        total: 0,
+        progress: 0
+      }
+    })
+
+    // Progress callback to store in database and broadcast real-time updates
     const progressCallback = async (progress: ExtendedCrawlProgress) => {
+      // Check if timed out
+      if (isTimedOut) {
+        throw new Error('Operation timed out')
+      }
+
       pagesProcessed++
       const elapsedTime = Date.now() - startTime
       const averageTimePerPage = elapsedTime / pagesProcessed
+
+      // Dynamic timeout adjustment based on performance
+      if (averageTimePerPage > INITIAL_TIMEOUT) {
+        console.warn(`Slow crawl detected: ${averageTimePerPage}ms per page`)
+      }
 
       // Add discovered links from progress
       if (progress.discoveredLinks) {
@@ -245,14 +370,14 @@ async function processWebsiteDirectly(
         averageTimePerPage
       }
 
-      await supabase
+      const { error: updateError } = await supabase
         .from('sources')
         .update({
           metadata: {
             url: normalizedUrl,
             crawl_subpages: crawlSubpages,
             max_pages: maxPages,
-            pages_crawled: progress.phase === 'processing' ? progress.current : 0,
+            pages_crawled: progress.current, // Always use current, not 0!
             crawled_pages: [],
             discovered_links: Array.from(discoveredLinks),
             crawl_errors: [],
@@ -262,8 +387,33 @@ async function processWebsiteDirectly(
         })
         .eq('id', sourceId)
 
+      if (updateError) {
+        console.error(`Failed to update progress for ${sourceId}:`, updateError)
+      }
+
+      // Broadcast real-time progress update
+      const broadcastData = {
+        sourceId,
+        status: 'progress',
+        phase: progress.phase,
+        current: progress.current,
+        total: progress.total,
+        currentUrl: progress.currentUrl,
+        discoveredLinks: Array.from(discoveredLinks),
+        pagesProcessed: progress.current,
+        progress: Math.round((progress.current / Math.max(progress.total || 1, 1)) * 100),
+        queueLength: progress.queueLength
+      }
+
+      // Send broadcast event for real-time updates
+      await supabase.channel(`crawl-${sourceId}`).send({
+        type: 'broadcast',
+        event: 'crawl_progress',
+        payload: broadcastData
+      })
+
       console.log(`Progress [${sourceId}]: ${progress.phase} - ${progress.current}/${progress.total} - ${progress.currentUrl}`)
-      console.log(`Discovered ${discoveredLinks.size} links so far`)
+      console.log(`Discovered ${discoveredLinks.size} links, broadcasted update`)
     }
 
     // Crawl website with progress tracking
@@ -272,17 +422,6 @@ async function processWebsiteDirectly(
     crawlResults.forEach(r => {
       console.log(`- ${r.url}: ${r.error ? `ERROR: ${r.error}` : `${r.content?.length || 0} chars`}`)
     })
-
-    // Clear progress from database after completion
-    await supabase
-      .from('sources')
-      .update({
-        metadata: {
-          ...((await supabase.from('sources').select('metadata').eq('id', sourceId).single()).data?.metadata || {}),
-          crawl_progress: null
-        }
-      })
-      .eq('id', sourceId)
 
     // Update pages crawled count with crawled pages list
     const crawledPages = crawlResults.filter(r => !r.error).map(r => r.url)
@@ -387,16 +526,33 @@ async function processWebsiteDirectly(
       })
       .eq('id', sourceId)
 
+    // Broadcast crawl completed successfully
+    await supabase.channel(`crawl-${sourceId}`).send({
+      type: 'broadcast',
+      event: 'crawl_progress',
+      payload: {
+        sourceId,
+        status: 'completed',
+        phase: 'completed',
+        pagesProcessed: validPages.length,
+        progress: 100
+      }
+    })
+
     console.log(`Successfully processed ${validPages.length} pages, ${totalChunks} chunks`)
+
+    // Clear the timeout since we completed successfully
+    clearTimeout(crawlTimeout)
+    isTimedOut = false
 
   } catch (error: any) {
     console.error(`Error processing website:`, error)
 
-    // Update source status to ready but with error info
-    await supabase
+    // Update source status to error
+    const { error: updateError } = await supabase
       .from('sources')
       .update({
-        status: 'ready',
+        status: 'error',
         size_kb: 0,
         chunk_count: 0,
         metadata: {
@@ -415,6 +571,34 @@ async function processWebsiteDirectly(
         updated_at: new Date().toISOString()
       })
       .eq('id', sourceId)
+
+    if (updateError) {
+      console.error(`Failed to update error status for ${sourceId}:`, updateError)
+    }
+
+    // Broadcast crawl failed
+    await supabase.channel(`crawl-${sourceId}`).send({
+      type: 'broadcast',
+      event: 'crawl_progress',
+      payload: {
+        sourceId,
+        status: 'failed',
+        phase: 'failed',
+        error: error.message || 'Failed to crawl website'
+      }
+    })
+
+    // Clear the timeout
+    clearTimeout(crawlTimeout)
+    isTimedOut = false
+  } finally {
+    // Ensure cleanup always happens
+    if (crawlTimeout) {
+      clearTimeout(crawlTimeout)
+    }
+    if (crawlAbortController) {
+      crawlAbortController.abort()
+    }
   }
 }
 

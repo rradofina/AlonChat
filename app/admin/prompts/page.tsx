@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -16,7 +17,8 @@ import {
   Copy,
   Check,
   AlertTriangle,
-  Sparkles
+  Sparkles,
+  ArrowLeft
 } from 'lucide-react'
 import {
   Dialog,
@@ -73,6 +75,7 @@ const categories = [
 
 export default function PromptsAdminPage() {
   const { toast } = useToast()
+  const router = useRouter()
   const [templates, setTemplates] = useState<PromptTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate | null>(null)
@@ -82,6 +85,9 @@ export default function PromptsAdminPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [filter, setFilter] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [masterPrompt, setMasterPrompt] = useState('')
+  const [savingMaster, setSavingMaster] = useState(false)
+  const [activeTab, setActiveTab] = useState('templates')
 
   // Form state
   const [formData, setFormData] = useState({
@@ -94,7 +100,51 @@ export default function PromptsAdminPage() {
 
   useEffect(() => {
     loadTemplates()
+    loadMasterPrompt()
   }, [])
+
+  const loadMasterPrompt = async () => {
+    try {
+      const response = await fetch('/api/admin/system-settings')
+      if (!response.ok) throw new Error('Failed to load master prompt')
+      const data = await response.json()
+      // The API now returns an array of settings
+      const masterSetting = data.settings?.find((s: any) => s.setting_key === 'master_system_prompt')
+      if (masterSetting) {
+        setMasterPrompt(masterSetting.setting_value || '')
+      }
+    } catch (error) {
+      console.error('Failed to load master prompt:', error)
+    }
+  }
+
+  const saveMasterPrompt = async () => {
+    setSavingMaster(true)
+    try {
+      const response = await fetch('/api/admin/system-settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          master_system_prompt: masterPrompt
+        })
+      })
+
+      if (!response.ok) throw new Error('Failed to save master prompt')
+
+      toast({
+        title: 'Success',
+        description: 'Master system prompt updated successfully'
+      })
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to save master prompt',
+        variant: 'destructive'
+      })
+    } finally {
+      setSavingMaster(false)
+    }
+  }
 
   const loadTemplates = async () => {
     try {
@@ -247,13 +297,88 @@ export default function PromptsAdminPage() {
   return (
     <div className="container mx-auto p-6 max-w-7xl">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Prompt Templates</h1>
-        <p className="text-gray-600">
-          Manage system-wide prompt templates for different AI assistant personalities and behaviors
-        </p>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h1 className="text-3xl font-bold mb-2">Prompt Management</h1>
+            <p className="text-gray-600">
+              Manage system-wide prompts and templates for AI assistants
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => router.push('/dashboard')}
+            className="flex items-center gap-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Dashboard
+          </Button>
+        </div>
       </div>
 
-      {/* Controls */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
+        <TabsList>
+          <TabsTrigger value="master">
+            <Shield className="h-4 w-4 mr-2" />
+            Master System Prompt
+          </TabsTrigger>
+          <TabsTrigger value="templates">
+            <Sparkles className="h-4 w-4 mr-2" />
+            Template Library
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="master" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Master System Prompt</CardTitle>
+              <CardDescription>
+                This prompt is automatically prepended to ALL agent conversations. Users cannot see or modify this.
+                Use it to enforce platform-wide rules, safety guidelines, and system behaviors.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Shield className="h-4 w-4 text-orange-500" />
+                  <span className="text-sm font-medium">Hidden System Instructions</span>
+                  <Badge variant="destructive" className="text-xs">Private</Badge>
+                </div>
+                <Textarea
+                  value={masterPrompt}
+                  onChange={(e) => setMasterPrompt(e.target.value)}
+                  className="min-h-[300px] font-mono text-sm"
+                  placeholder="Enter master system prompt that will be prepended to all agent prompts..."
+                />
+                <p className="text-xs text-gray-500 mt-2">
+                  <AlertTriangle className="inline h-3 w-3 mr-1 text-orange-500" />
+                  This prompt is invisible to users and is added before any user-selected template
+                </p>
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  onClick={saveMasterPrompt}
+                  disabled={savingMaster}
+                >
+                  {savingMaster ? (
+                    <>
+                      <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-2" />
+                      Save Master Prompt
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="templates">
+
+          {/* Controls */}
       <div className="flex flex-col sm:flex-row gap-4 mb-6">
         <Input
           placeholder="Search templates..."
@@ -286,7 +411,7 @@ export default function PromptsAdminPage() {
         </Button>
       </div>
 
-      {/* Templates Grid */}
+          {/* Templates Grid */}
       <div className="space-y-8">
         {Object.entries(groupedTemplates).map(([category, categoryTemplates]) => (
           <div key={category}>
@@ -376,9 +501,11 @@ export default function PromptsAdminPage() {
                 </Card>
               ))}
             </div>
-          </div>
-        ))}
-      </div>
+            </div>
+          ))}
+        </div>
+        </TabsContent>
+      </Tabs>
 
       {/* Create/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

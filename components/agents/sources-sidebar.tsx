@@ -53,8 +53,17 @@ export default function SourcesSidebar({ agentId, showRetrainingAlert, refreshTr
           }))
           // If status changes from training to ready/error, update local training state
           if (payload.new.status !== 'training') {
+            const wasTraining = isTraining || agentData.status === 'training'
             setIsTraining(false)
             fetchStats() // Refresh stats after training
+
+            // Show notification when training completes successfully
+            if (wasTraining && payload.new.status === 'active') {
+              toast({
+                title: 'Training complete!',
+                description: 'Your agent is ready. Go to Playground to test it.',
+              })
+            }
           }
         }
       )

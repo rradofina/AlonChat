@@ -2,6 +2,8 @@ import * as cheerio from 'cheerio'
 import { scrapeWebsiteWithPlaywrightPooled } from './playwright-scraper-pooled'
 import { CrawlResult, CrawlProgress, CrawlOptions } from '@/lib/types/crawler'
 
+export { CrawlProgress } from '@/lib/types/crawler'
+
 export class WebsiteScraper {
   private maxPages: number
   private crawlSubpages: boolean

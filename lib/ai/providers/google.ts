@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import { AIProvider, ChatCompletionOptions, ChatCompletionResult } from './base'
+import { AIProvider, ChatCompletionOptions, ChatCompletionResult, HealthCheckResult } from './base'
+import { sanitizeLLMOptions } from '../utils/sanitize-options'
 
 export class GoogleProvider implements AIProvider {
   name = 'google'
@@ -26,6 +27,9 @@ export class GoogleProvider implements AIProvider {
       throw new Error('Google provider not configured')
     }
 
+    // Sanitize and validate parameters
+    const safe = sanitizeLLMOptions(options, 'google')
+
     const model = this.client.getGenerativeModel({
       model: options.model
     })
@@ -41,9 +45,9 @@ export class GoogleProvider implements AIProvider {
     const chat = model.startChat({
       history,
       generationConfig: {
-        temperature: options.temperature,
-        maxOutputTokens: options.maxTokens,
-        topP: options.topP,
+        temperature: safe.temperature,
+        maxOutputTokens: safe.maxTokens,
+        topP: safe.topP,
       }
     })
 
@@ -74,5 +78,35 @@ export class GoogleProvider implements AIProvider {
     }
     const pricePerToken = pricing[model] || 0
     return (tokens * pricePerToken) / 1000
+  }
+
+  async healthCheck(): Promise<HealthCheckResult> {
+    const startTime = Date.now()
+    try {
+      if (!this.client) {
+        return {
+          isHealthy: false,
+          lastChecked: new Date(),
+          error: 'Google provider not configured'
+        }
+      }
+
+      // Try a minimal API call to check connectivity
+      const model = this.client.getGenerativeModel({ model: 'gemini-1.5-flash' })
+      await model.generateContent('test')
+
+      return {
+        isHealthy: true,
+        lastChecked: new Date(),
+        responseTime: Date.now() - startTime
+      }
+    } catch (error: any) {
+      return {
+        isHealthy: false,
+        lastChecked: new Date(),
+        error: error.message || 'Service unavailable',
+        responseTime: Date.now() - startTime
+      }
+    }
   }
 }

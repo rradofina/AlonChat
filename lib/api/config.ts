@@ -5,6 +5,7 @@ export interface AIModel {
   name: string
   display_name: string
   provider: string
+  provider_logo?: string
   model_id: string
   description?: string
   context_window?: number
@@ -64,6 +65,7 @@ class ConfigService {
     if (cached) return cached
 
     try {
+      // First get the models
       let query = this.supabase
         .from('ai_models')
         .select('*')
@@ -73,11 +75,30 @@ class ConfigService {
         query = query.eq('is_active', true)
       }
 
-      const { data, error } = await query
+      const { data: modelsData, error: modelsError } = await query
 
-      if (error) throw error
+      if (modelsError) throw modelsError
 
-      const models = data || []
+      // Then get the providers
+      const { data: providersData, error: providersError } = await this.supabase
+        .from('ai_providers')
+        .select('id, logo_url')
+
+      if (providersError) throw providersError
+
+      // Map provider logos to models
+      const providerLogoMap: Record<string, string> = {}
+      providersData?.forEach(provider => {
+        if (provider.logo_url) {
+          providerLogoMap[provider.id] = provider.logo_url
+        }
+      })
+
+      const models = (modelsData || []).map(model => ({
+        ...model,
+        provider_logo: model.provider_id ? providerLogoMap[model.provider_id] || null : null
+      }))
+
       this.setCache(cacheKey, models)
       return models
     } catch (error) {

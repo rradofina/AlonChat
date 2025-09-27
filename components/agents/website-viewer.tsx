@@ -43,6 +43,13 @@ export function WebsiteViewer({ website, subLink, onBack }: WebsiteViewerProps) 
   const [isLoadingContent, setIsLoadingContent] = useState(true)
 
   useEffect(() => {
+    // Check if this is a discovered-only link (not crawled)
+    if (subLink && !subLink.crawled) {
+      setIsLoadingContent(false)
+      setContent('')
+      return
+    }
+
     // Fetch content from API
     const fetchContent = async () => {
       if (!website.id) {
@@ -67,9 +74,14 @@ export function WebsiteViewer({ website, subLink, onBack }: WebsiteViewerProps) 
     }
 
     fetchContent()
-  }, [website.id, website.agent_id])
+  }, [website.id, website.agent_id, subLink])
 
   const getStatusIcon = () => {
+    // If viewing a discovered-only sublink (not crawled), show different status
+    if (subLink && !subLink.crawled) {
+      return <AlertCircle className="h-4 w-4 text-yellow-500" />
+    }
+
     switch (website.status) {
       case 'ready':
         return <CheckCircle className="h-4 w-4 text-green-500" />
@@ -84,6 +96,11 @@ export function WebsiteViewer({ website, subLink, onBack }: WebsiteViewerProps) 
   }
 
   const getStatusText = () => {
+    // If viewing a discovered-only sublink (not crawled), show different status
+    if (subLink && !subLink.crawled) {
+      return 'Discovered Only'
+    }
+
     switch (website.status) {
       case 'ready':
         return 'Ready'
@@ -228,6 +245,12 @@ export function WebsiteViewer({ website, subLink, onBack }: WebsiteViewerProps) 
                       <Loader2 className="h-8 w-8 text-blue-500 animate-spin mb-4" />
                       <p className="text-gray-500">Processing website content...</p>
                       <p className="text-sm text-gray-400 mt-2">This may take a few moments</p>
+                    </>
+                  ) : subLink && !subLink.crawled ? (
+                    <>
+                      <AlertCircle className="h-12 w-12 text-yellow-400 mb-4" />
+                      <p className="text-gray-500">Page not crawled</p>
+                      <p className="text-sm text-gray-400 mt-2">This page was discovered but not crawled due to the max pages limit</p>
                     </>
                   ) : (
                     <>

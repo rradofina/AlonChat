@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { modelService } from '@/lib/services/model-service'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,20 +30,49 @@ const steps = [
 export function AgentWizard({ open, onOpenChange, projectId }: AgentWizardProps) {
   const [currentStep, setCurrentStep] = useState(0)
   const [isCreating, setIsCreating] = useState(false)
+  const [availableModels, setAvailableModels] = useState<any[]>([])
+  const [loadingModels, setLoadingModels] = useState(true)
   const router = useRouter()
   const supabase = createClient()
 
-  // Form data
+  // Form data - model will be set dynamically
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    model: 'gpt-3.5-turbo',
+    model: '', // Will be set from default model
     temperature: '0.7',
     maxTokens: '500',
-    systemPrompt: "You are a helpful AI assistant. Answer questions accurately and concisely.",
+    systemPrompt: "You are a helpful AI assistant. Answer questions accurately and concisely based on the provided training data.",
     welcomeMessage: "Hi! How can I help you today?",
     suggestedQuestions: ['What can you help me with?', 'Tell me more about your capabilities', 'How do I get started?'],
   })
+
+  // Load available models and set default
+  useEffect(() => {
+    async function loadModels() {
+      try {
+        const models = await modelService.getAvailableModels(false)
+        setAvailableModels(models)
+
+        // Get the default model
+        const defaultModel = await modelService.getDefaultModel(false)
+        if (defaultModel) {
+          setFormData(prev => ({ ...prev, model: defaultModel }))
+        } else if (models.length > 0) {
+          // Fallback to first available model if no default
+          setFormData(prev => ({ ...prev, model: models[0].name }))
+        }
+      } catch (error) {
+        console.error('Failed to load models:', error)
+        toast.error('Failed to load AI models')
+      } finally {
+        setLoadingModels(false)
+      }
+    }
+    if (open) {
+      loadModels()
+    }
+  }, [open])
 
   const progress = ((currentStep + 1) / steps.length) * 100
 
@@ -134,15 +164,29 @@ export function AgentWizard({ open, onOpenChange, projectId }: AgentWizardProps)
               <Label htmlFor="model">AI Model</Label>
               <Select value={formData.model} onValueChange={(value) => setFormData({ ...formData, model: value })}>
                 <SelectTrigger className="mt-1">
-                  <SelectValue />
+                  <SelectValue placeholder={loadingModels ? "Loading models..." : "Select a model"} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo (Fast & Affordable)</SelectItem>
-                  <SelectItem value="gpt-4">GPT-4 (Most Capable)</SelectItem>
-                  <SelectItem value="gpt-4-turbo-preview">GPT-4 Turbo (Latest)</SelectItem>
+                  {loadingModels ? (
+                    <SelectItem value="" disabled>Loading models...</SelectItem>
+                  ) : availableModels.length > 0 ? (
+                    availableModels.map((model: any) => (
+                      <SelectItem key={model.id} value={model.name}>
+                        {model.display_name || model.name}
+                        {model.is_default && ' (Default)'}
+                        {model.description && ` - ${model.description}`}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="" disabled>No models available</SelectItem>
+                  )}
                 </SelectContent>
               </Select>
-              <p className="text-sm text-gray-500 mt-1">Choose based on your needs and budget</p>
+              <p className="text-sm text-gray-500 mt-1">
+                {availableModels.length > 0
+                  ? "Choose based on your needs and budget"
+                  : "Please configure AI models in admin settings"}
+              </p>
             </div>
             <div>
               <Label htmlFor="temperature">Temperature: {formData.temperature}</Label>

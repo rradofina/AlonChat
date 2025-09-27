@@ -1,5 +1,44 @@
 # PERSISTENT_ISSUES.md - Recurring Problems & Solutions
 
+## 🔥🔥🔥 CRITICAL: LOCALHOST:3000 COMPILATION HANGS - PERMANENT FIX APPLIED 🔥🔥🔥
+### ⚠️ IF LOCALHOST:3000 JUST SPINS FOREVER ⚠️
+
+**ROOT CAUSES IDENTIFIED & FIXED (January 27, 2025):**
+1. **Middleware SSR Issues** - Supabase SSR in middleware causes infinite loops
+2. **Experimental CPU Flag** - The `cpus: 1` flag causes webpack layer errors
+3. **Windows Worker Threads** - Worker threads cause memory and CPU issues on Windows
+4. **Next.js 15 Changes** - Cookie handling changed in Next.js 15
+
+### PERMANENT FIX APPLIED:
+```bash
+# 1. Middleware has been REMOVED (middleware.ts → middleware.ts.bak)
+# 2. Auth moved to client-side (no SSR auth)
+# 3. Experimental cpus flag REMOVED from next.config.js
+# 4. Worker threads disabled for Windows
+
+# To start the dev server:
+netstat -ano | findstr :3000  # Find PID on port 3000
+taskkill //PID {pid} //F      # Kill specific PID
+npm run dev                    # Start on port 3000
+```
+
+### DO NOT REVERT THESE CHANGES:
+- ❌ DO NOT restore middleware.ts
+- ❌ DO NOT add `cpus: 1` to experimental config
+- ❌ DO NOT add server-side auth to middleware
+- ❌ DO NOT use AuthProvider in layout.tsx
+
+### WHY THIS WORKS:
+- Client-side auth works fine without middleware
+- No SSR overhead during development
+- No worker thread issues on Windows
+- Fast compilation and hot reload
+
+### If compilation still hangs after 30+ seconds:
+1. Kill all Node processes: `taskkill //F //IM node.exe`
+2. Clear Next.js cache: `rmdir /s /q .next`
+3. Restart: `npm run dev`
+
 ## 🚨🚨🚨 CRITICAL: PORT 3000 ENFORCEMENT 🚨🚨🚨
 ### ⚠️ CHECK THIS FIRST BEFORE STARTING DEV SERVER ⚠️
 
@@ -576,6 +615,7 @@ if (untrainedIds.length > 0) {
 - Next.js dev server crashes and restarts infinitely
 - Webpack compilation never completes
 - App stuck loading forever at localhost:3000
+- Error appears even when not running tests (it's webpack's jest-worker, not Jest itself)
 
 ### Root Cause
 **CRITICAL: Project location in OneDrive causes file locking conflicts**
@@ -584,37 +624,79 @@ if (untrainedIds.length > 0) {
 3. **Known Next.js 15 Bug**: [GitHub Issue #23519](https://github.com/vercel/next.js/issues/23519) - Windows-specific infinite worker spawning
 4. **Memory Exhaustion**: Each crash leaves zombie processes consuming memory until system runs out
 
-### Solution - Comprehensive Windows Fix
+### Solution - Comprehensive Windows Fix (UPDATED: September 27, 2025)
 **Applied Configuration Changes:**
 
-1. **Created .env.development.local**:
+1. **Updated .env.development.local**:
 ```env
+# Windows-specific Next.js 15 fixes for Jest worker issues
 NODE_OPTIONS=--max-old-space-size=4096 --unhandled-rejections=strict
 WATCHPACK_POLLING=true
 NEXT_DISABLE_SWC_WASM_FALLBACK=1
+NEXT_TELEMETRY_DISABLED=1
+
+# Disable parallel processing to prevent jest-worker crashes
+NEXT_CPU_PROF=1
 NEXT_PRIVATE_WORKER_THREADS=false
+
+# Use polling for file watching (fixes OneDrive issues)
 CHOKIDAR_USEPOLLING=true
 WATCHPACK_POLLING_INTERVAL=100
+WATCHPACK_AGGREGATION_TIMEOUT=300
+
+# Webpack memory optimizations
+GENERATE_SOURCEMAP=false
+
+# Additional Jest worker fixes
+JEST_MAX_WORKERS=1
+NEXT_DISABLE_TURBOPACK=1
+
+# Force single-threaded compilation
+WEBPACK_MAX_CHUNKS=1
 ```
 
 2. **Updated next.config.js**:
 ```javascript
-// Completely disable parallel processing
-config.parallelism = 1
-config.cache = false // OneDrive causes cache corruption
+webpack: (config, { isServer, dev }) => {
+  // ... existing config ...
 
-// Windows file watching
-config.watchOptions = {
-  poll: true,
-  aggregateTimeout: 500,
-  followSymlinks: false
-}
+  // Windows-specific fixes for Jest worker issues
+  if (dev && process.platform === 'win32') {
+    // Disable parallel compilation on Windows to prevent Jest worker crashes
+    config.parallelism = 1
 
-// Disable all experiments causing issues
-config.experiments = {
-  layers: false,
-  lazyCompilation: false,
-  outputModule: false
+    // Disable webpack cache that causes issues with OneDrive
+    config.cache = false
+
+    // Configure file watching for Windows
+    config.watchOptions = {
+      poll: true,
+      aggregateTimeout: 500,
+      followSymlinks: false,
+      ignored: /node_modules/,
+    }
+
+    // Disable experimental features that cause worker issues
+    if (config.experiments) {
+      config.experiments = {
+        ...config.experiments,
+        layers: false,
+        lazyCompilation: false,
+        outputModule: false,
+      }
+    }
+  }
+
+  return config
+},
+
+// Disable SWC minification on Windows dev to reduce worker spawning
+swcMinify: process.env.NODE_ENV === 'production',
+
+// Experimental flags to reduce worker issues
+experimental: {
+  workerThreads: false,
+  cpus: 1,
 }
 ```
 

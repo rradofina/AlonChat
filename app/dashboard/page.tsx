@@ -7,32 +7,49 @@ import { Bot, Plus } from 'lucide-react'
 export default async function DashboardPage() {
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // Get authenticated user
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
 
-  if (!user) {
+  if (authError || !user) {
     redirect('/login')
   }
 
-  // Get user's project
-  const { data: projects } = await supabase
+  // Get user's project - now guaranteed to be unique due to constraint
+  const { data: project, error: projectError } = await supabase
     .from('projects')
     .select('*')
     .eq('owner_id', user.id)
-    .order('created_at', { ascending: false })
-    .limit(1)
+    .single()
 
-  const project = projects?.[0]
+  if (projectError || !project) {
+    // If no project exists, create one instead of redirecting
+    const { data: newProject } = await supabase
+      .from('projects')
+      .insert({
+        name: `${user.email?.split('@')[0]}'s Project`,
+        owner_id: user.id
+      })
+      .select()
+      .single()
 
-  if (!project) {
-    redirect('/onboarding')
+    if (newProject) {
+      redirect('/dashboard')
+    } else {
+      redirect('/onboarding')
+    }
   }
 
-  // Get agents in the project
-  const { data: agents } = await supabase
+  // Get agents - now optimized with indexes
+  const { data: agents, error: agentsError } = await supabase
     .from('agents')
     .select('*')
     .eq('project_id', project.id)
     .order('created_at', { ascending: false })
+
+  // Handle errors gracefully
+  if (agentsError) {
+    console.error('Failed to fetch agents:', agentsError)
+  }
 
   return (
     <div className="p-6">
@@ -67,7 +84,7 @@ export default async function DashboardPage() {
           </div>
 
           <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-            No agents yet..
+            No agents yet
           </h2>
           <p className="text-gray-600 text-center mb-8 max-w-md">
             Create your first AI Agent to start automating support, generating leads, and answering customer questions.
