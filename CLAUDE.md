@@ -102,10 +102,22 @@ Use MCP when it **simplifies** the task, not when it **complicates** it.
 ## Development Environment
 
 ### Port Configuration
-**IMPORTANT: ALWAYS USE PORT 3000**
+**CRITICAL: ALWAYS USE PORT 3000 - NO EXCEPTIONS**
+**ALWAYS USE PORT 3000**
+**ALWAYS USE PORT 3000**
+**ALWAYS USE PORT 3000**
+**ALWAYS USE PORT 3000**
+**ALWAYS USE PORT 3000**
+**ALWAYS USE PORT 3000**
+**ALWAYS USE PORT 3000**
+**ALWAYS USE PORT 3000**
+**ALWAYS USE PORT 3000**
+**ALWAYS USE PORT 3000**
+
 - This project exclusively uses `localhost:3000` for development
-- If there are issues on port 3000 and a reset is needed, resolve the port 3000 issue
-- DO NOT use alternative ports - always fix and use port 3000
+- If port 3000 is in use, KILL the process using it (taskkill //PID {pid} //F on Windows)
+- DO NOT use alternative ports (3001, 3002, 3003, etc.) - always fix and use port 3000
+- The user will be annoyed if you use any port other than 3000
 
 ## Code Quality Standards
 

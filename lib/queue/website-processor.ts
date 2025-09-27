@@ -4,7 +4,6 @@ import { UnifiedCrawler } from '@/lib/crawler/unified-crawler'
 import { ChunkManager } from '@/lib/services/chunk-manager'
 import { getSharedConnection, getWorkerConnection } from './redis-connection'
 import { WebsiteCrawlJob } from '@/lib/types/crawler'
-import { getEventBus, EventTypes } from '@/lib/infrastructure/events/EventBus'
 
 let websiteQueue: Queue<WebsiteCrawlJob> | null = null
 let websiteWorker: Worker<WebsiteCrawlJob> | null = null
@@ -82,20 +81,27 @@ export function initWebsiteWorker() {
 async function processWebsiteCrawl(job: Job<WebsiteCrawlJob>) {
   const { sourceId, agentId, projectId, url, crawlSubpages, maxPages } = job.data
   const supabase = await createClient()
-  const eventBus = getEventBus()
+
+  // Create Supabase Realtime channel for progress updates
+  const channel = supabase.channel(`crawl-${sourceId}`)
 
   try {
-    // Emit crawl started event
-    await eventBus.emit(EventTypes.CRAWL_STARTED, {
-      jobId: job.id || '',
-      sourceId,
-      projectId,
-      phase: 'discovering',
-      progress: 0,
-      currentUrl: url,
-      pagesProcessed: 0,
-      totalPages: maxPages,
-      timestamp: Date.now()
+    // Broadcast crawl started event via Supabase Realtime
+    await channel.send({
+      type: 'broadcast',
+      event: 'crawl_progress',
+      payload: {
+        jobId: job.id || '',
+        sourceId,
+        projectId,
+        phase: 'discovering',
+        progress: 0,
+        currentUrl: url,
+        pagesProcessed: 0,
+        totalPages: maxPages,
+        status: 'started',
+        timestamp: Date.now()
+      }
     })
 
     // Update status to processing
@@ -127,17 +133,22 @@ async function processWebsiteCrawl(job: Job<WebsiteCrawlJob>) {
         const progressPercent = Math.floor((progress.current / progress.total) * 80) + 10
         await job.updateProgress(progressPercent)
 
-        // Emit real-time progress event
-        await eventBus.emit(EventTypes.CRAWL_PROGRESS, {
-          jobId: job.id || '',
-          sourceId,
-          projectId,
-          phase: (progress.phase as any) || 'processing',
-          progress: progressPercent,
-          currentUrl: progress.currentUrl,
-          pagesProcessed: progress.current,
-          totalPages: progress.total,
-          timestamp: Date.now()
+        // Broadcast real-time progress via Supabase Realtime
+        await channel.send({
+          type: 'broadcast',
+          event: 'crawl_progress',
+          payload: {
+            jobId: job.id || '',
+            sourceId,
+            projectId,
+            phase: (progress.phase as any) || 'processing',
+            progress: progressPercent,
+            currentUrl: progress.currentUrl,
+            pagesProcessed: progress.current,
+            totalPages: progress.total,
+            status: 'progress',
+            timestamp: Date.now()
+          }
         })
 
         // Update source metadata
@@ -228,32 +239,48 @@ async function processWebsiteCrawl(job: Job<WebsiteCrawlJob>) {
     await job.updateProgress(100)
     console.log(`Successfully processed ${validPages.length} pages, ${totalChunks} chunks`)
 
-    // Emit crawl completed event
-    await eventBus.emit(EventTypes.CRAWL_COMPLETED, {
-      jobId: job.id || '',
-      sourceId,
-      projectId,
-      phase: 'completed',
-      progress: 100,
-      pagesProcessed: validPages.length,
-      totalPages: validPages.length,
-      timestamp: Date.now()
+    // Broadcast crawl completed via Supabase Realtime
+    await channel.send({
+      type: 'broadcast',
+      event: 'crawl_progress',
+      payload: {
+        jobId: job.id || '',
+        sourceId,
+        projectId,
+        phase: 'completed',
+        progress: 100,
+        pagesProcessed: validPages.length,
+        totalPages: validPages.length,
+        status: 'completed',
+        timestamp: Date.now()
+      }
     })
+
+    // Clean up channel
+    await supabase.removeChannel(channel)
 
   } catch (error: any) {
     console.error(`Error processing website crawl:`, error)
 
-    // Emit crawl failed event
-    await eventBus.emit(EventTypes.CRAWL_FAILED, {
-      jobId: job.id || '',
-      sourceId,
-      projectId,
-      phase: 'failed',
-      progress: 0,
-      error: error.message,
-      pagesProcessed: 0,
-      timestamp: Date.now()
+    // Broadcast crawl failed via Supabase Realtime
+    await channel.send({
+      type: 'broadcast',
+      event: 'crawl_progress',
+      payload: {
+        jobId: job.id || '',
+        sourceId,
+        projectId,
+        phase: 'failed',
+        progress: 0,
+        error: error.message,
+        pagesProcessed: 0,
+        status: 'failed',
+        timestamp: Date.now()
+      }
     })
+
+    // Clean up channel
+    await supabase.removeChannel(channel)
 
     // Update source status to error
     await supabase

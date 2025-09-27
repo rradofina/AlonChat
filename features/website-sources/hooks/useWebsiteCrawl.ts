@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { RealtimeGateway } from '@/lib/infrastructure/realtime/RealtimeGateway'
-import { EventTypes } from '@/lib/infrastructure/events/EventTypes'
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { toast } from '@/components/ui/use-toast'
 
 /**
@@ -18,6 +17,7 @@ export interface CrawlProgress {
   totalPages?: number
   error?: string
   timestamp: number
+  status?: string
 }
 
 /**
@@ -33,180 +33,133 @@ export interface UseWebsiteCrawlConfig {
 }
 
 /**
- * React hook for managing website crawl with real-time progress
+ * React hook for managing website crawl with real-time progress using Supabase Realtime
  */
 export function useWebsiteCrawl(config: UseWebsiteCrawlConfig = {}) {
   const [isConnected, setIsConnected] = useState(false)
   const [crawlProgress, setCrawlProgress] = useState<Map<string, CrawlProgress>>(new Map())
   const [activeCrawls, setActiveCrawls] = useState<Set<string>>(new Set())
-  const gatewayRef = useRef<RealtimeGateway | null>(null)
-  const unsubscribersRef = useRef<Array<() => void>>([])
-
-  /**
-   * Initialize real-time gateway
-   */
-  const initializeGateway = useCallback(() => {
-    if (gatewayRef.current) {
-      return gatewayRef.current
-    }
-
-    const gateway = new RealtimeGateway({
-      projectId: config.projectId,
-      sourceId: config.sourceId,
-      eventTypes: ['crawl'],
-      onConnect: () => {
-        console.log('[useWebsiteCrawl] Connected to real-time updates')
-        setIsConnected(true)
-      },
-      onDisconnect: () => {
-        console.log('[useWebsiteCrawl] Disconnected from real-time updates')
-        setIsConnected(false)
-      },
-      onError: (error) => {
-        console.error('[useWebsiteCrawl] Real-time error:', error)
-        toast({
-          title: 'Connection Error',
-          description: 'Failed to connect to real-time updates. Retrying...',
-          variant: 'destructive',
-        })
-      },
-    })
-
-    gatewayRef.current = gateway
-    return gateway
-  }, [config.projectId, config.sourceId])
+  const channelRef = useRef<any>(null)
+  const supabase = createClientComponentClient()
 
   /**
    * Connect to real-time updates
    */
   const connect = useCallback(async () => {
-    const gateway = initializeGateway()
+    // Create a channel for crawl progress updates
+    const channelName = config.sourceId ? `crawl-${config.sourceId}` : `crawl-project-${config.projectId || 'global'}`
 
-    try {
-      await gateway.connect()
+    const channel = supabase.channel(channelName)
 
-      // Subscribe to crawl events
-      const unsubProgress = gateway.on(EventTypes.CRAWL_PROGRESS, (data: CrawlProgress) => {
+    channel
+      .on('broadcast', { event: 'crawl_progress' }, (payload) => {
+        const data = payload.payload as CrawlProgress
         console.log('[useWebsiteCrawl] Progress update:', data)
 
-        setCrawlProgress(prev => {
-          const updated = new Map(prev)
-          updated.set(data.sourceId, data)
-          return updated
-        })
+        // Handle different statuses
+        if (data.status === 'started') {
+          setCrawlProgress(prev => {
+            const updated = new Map(prev)
+            updated.set(data.sourceId, { ...data, phase: 'discovering', progress: 0 })
+            return updated
+          })
 
-        setActiveCrawls(prev => {
-          const updated = new Set(prev)
-          updated.add(data.sourceId)
-          return updated
-        })
+          setActiveCrawls(prev => {
+            const updated = new Set(prev)
+            updated.add(data.sourceId)
+            return updated
+          })
 
-        config.onProgress?.(data)
+          toast({
+            title: 'Crawl Started',
+            description: 'Starting to crawl website...',
+          })
+        } else if (data.status === 'progress') {
+          setCrawlProgress(prev => {
+            const updated = new Map(prev)
+            updated.set(data.sourceId, data)
+            return updated
+          })
+
+          setActiveCrawls(prev => {
+            const updated = new Set(prev)
+            updated.add(data.sourceId)
+            return updated
+          })
+
+          config.onProgress?.(data)
+        } else if (data.status === 'completed') {
+          setCrawlProgress(prev => {
+            const updated = new Map(prev)
+            updated.set(data.sourceId, { ...data, phase: 'completed', progress: 100 })
+            return updated
+          })
+
+          setActiveCrawls(prev => {
+            const updated = new Set(prev)
+            updated.delete(data.sourceId)
+            return updated
+          })
+
+          toast({
+            title: 'Crawl Completed',
+            description: `Successfully crawled ${data.pagesProcessed} pages`,
+          })
+
+          config.onComplete?.(data.sourceId)
+        } else if (data.status === 'failed') {
+          setCrawlProgress(prev => {
+            const updated = new Map(prev)
+            updated.set(data.sourceId, { ...data, phase: 'failed', progress: 0 })
+            return updated
+          })
+
+          setActiveCrawls(prev => {
+            const updated = new Set(prev)
+            updated.delete(data.sourceId)
+            return updated
+          })
+
+          toast({
+            title: 'Crawl Failed',
+            description: data.error || 'An error occurred during crawling',
+            variant: 'destructive',
+          })
+
+          config.onError?.(data.error || 'Crawl failed', data.sourceId)
+        }
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[useWebsiteCrawl] Connected to real-time updates')
+          setIsConnected(true)
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[useWebsiteCrawl] Channel error')
+          toast({
+            title: 'Connection Error',
+            description: 'Failed to connect to real-time updates',
+            variant: 'destructive',
+          })
+          setIsConnected(false)
+        } else if (status === 'CLOSED') {
+          console.log('[useWebsiteCrawl] Disconnected from real-time updates')
+          setIsConnected(false)
+        }
       })
 
-      const unsubCompleted = gateway.on(EventTypes.CRAWL_COMPLETED, (data: CrawlProgress) => {
-        console.log('[useWebsiteCrawl] Crawl completed:', data)
-
-        setCrawlProgress(prev => {
-          const updated = new Map(prev)
-          updated.set(data.sourceId, { ...data, phase: 'completed', progress: 100 })
-          return updated
-        })
-
-        setActiveCrawls(prev => {
-          const updated = new Set(prev)
-          updated.delete(data.sourceId)
-          return updated
-        })
-
-        toast({
-          title: 'Crawl Completed',
-          description: `Successfully crawled ${data.pagesProcessed} pages`,
-        })
-
-        config.onComplete?.(data.sourceId)
-      })
-
-      const unsubFailed = gateway.on(EventTypes.CRAWL_FAILED, (data: CrawlProgress) => {
-        console.error('[useWebsiteCrawl] Crawl failed:', data)
-
-        setCrawlProgress(prev => {
-          const updated = new Map(prev)
-          updated.set(data.sourceId, { ...data, phase: 'failed', progress: 0 })
-          return updated
-        })
-
-        setActiveCrawls(prev => {
-          const updated = new Set(prev)
-          updated.delete(data.sourceId)
-          return updated
-        })
-
-        toast({
-          title: 'Crawl Failed',
-          description: data.error || 'An error occurred during crawling',
-          variant: 'destructive',
-        })
-
-        config.onError?.(data.error || 'Crawl failed', data.sourceId)
-      })
-
-      const unsubStarted = gateway.on(EventTypes.CRAWL_STARTED, (data: CrawlProgress) => {
-        console.log('[useWebsiteCrawl] Crawl started:', data)
-
-        setCrawlProgress(prev => {
-          const updated = new Map(prev)
-          updated.set(data.sourceId, { ...data, phase: 'discovering', progress: 0 })
-          return updated
-        })
-
-        setActiveCrawls(prev => {
-          const updated = new Set(prev)
-          updated.add(data.sourceId)
-          return updated
-        })
-
-        toast({
-          title: 'Crawl Started',
-          description: 'Starting to crawl website...',
-        })
-      })
-
-      // Store unsubscribers
-      unsubscribersRef.current = [unsubProgress, unsubCompleted, unsubFailed, unsubStarted]
-
-    } catch (error) {
-      console.error('[useWebsiteCrawl] Failed to connect:', error)
-      toast({
-        title: 'Connection Failed',
-        description: 'Could not establish real-time connection',
-        variant: 'destructive',
-      })
-    }
-  }, [initializeGateway, config])
+    channelRef.current = channel
+  }, [config.sourceId, config.projectId, config.onProgress, config.onComplete, config.onError, supabase])
 
   /**
    * Disconnect from real-time updates
    */
   const disconnect = useCallback(() => {
-    // Unsubscribe from all events
-    unsubscribersRef.current.forEach(unsub => {
-      try {
-        unsub()
-      } catch (error) {
-        console.error('[useWebsiteCrawl] Error unsubscribing:', error)
-      }
-    })
-    unsubscribersRef.current = []
-
-    // Disconnect gateway
-    if (gatewayRef.current) {
-      gatewayRef.current.disconnect()
-      gatewayRef.current = null
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current)
+      channelRef.current = null
     }
-
     setIsConnected(false)
-  }, [])
+  }, [supabase])
 
   /**
    * Start a website crawl
@@ -254,7 +207,7 @@ export function useWebsiteCrawl(config: UseWebsiteCrawlConfig = {}) {
       })
 
       return data.jobId || data.id
-    } catch (error) {
+    } catch (error: any) {
       console.error('[useWebsiteCrawl] Failed to start crawl:', error)
       toast({
         title: 'Failed to Start Crawl',
@@ -315,15 +268,13 @@ export function useWebsiteCrawl(config: UseWebsiteCrawlConfig = {}) {
     }
   }, []) // Only run on mount/unmount
 
-  // Update gateway config when props change
+  // Reconnect when config changes
   useEffect(() => {
-    if (gatewayRef.current && isConnected) {
-      gatewayRef.current.updateConfig({
-        projectId: config.projectId,
-        sourceId: config.sourceId,
-      })
+    if (isConnected) {
+      disconnect()
+      connect()
     }
-  }, [config.projectId, config.sourceId, isConnected])
+  }, [config.projectId, config.sourceId])
 
   return {
     // State
