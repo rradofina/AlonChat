@@ -1,13 +1,21 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { useParams, usePathname } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { Send, Bot, User, RefreshCw, Copy, Download, Save, Smile, Lightbulb } from 'lucide-react'
+import { Send, Bot, User, RefreshCw, Copy, Lightbulb } from 'lucide-react'
 import { toast } from 'sonner'
-import Link from 'next/link'
-import { configService, AIModel, PromptPreset } from '@/lib/api/config'
-import { ModelDropdown } from '@/components/ui/model-dropdown'
+
+// Import shared hooks
+import { useAgent } from '@/hooks/use-agent'
+import { useAIModels } from '@/hooks/use-ai-models'
+import { usePromptTemplates } from '@/hooks/use-prompt-templates'
+
+// Import reusable components
+import { ModelSelector } from '@/components/ai/model-selector'
+import { TemplateSelector } from '@/components/ai/template-selector'
+import { TemperatureSlider } from '@/components/ai/temperature-slider'
+import { PromptEditor } from '@/components/ai/prompt-editor'
 
 interface Message {
   id: string
@@ -18,108 +26,114 @@ interface Message {
 
 export default function PlaygroundPage() {
   const params = useParams()
-  const pathname = usePathname()
   const agentId = params.id as string
+  const supabase = createClient()
+
+  // Use shared hooks
+  const { agent, loading: agentLoading, updateAgent } = useAgent(agentId)
+  const { models, loading: modelsLoading } = useAIModels()
+  const { templates, loading: templatesLoading, getTemplateById } = usePromptTemplates()
+
+  // Chat state
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [agent, setAgent] = useState<any>(null)
-  const [temperature, setTemperature] = useState(0.5)
-  const [systemPrompt, setSystemPrompt] = useState('')
-  const [selectedModel, setSelectedModel] = useState<string>('')
-  const [promptPreset, setPromptPreset] = useState<string>('')
-  const [compareMode, setCompareMode] = useState(false)
-  const [availableModels, setAvailableModels] = useState<AIModel[]>([])
-  const [availablePresets, setAvailablePresets] = useState<PromptPreset[]>([])
-  const [loadingConfig, setLoadingConfig] = useState(true)
-  const [showTooltip, setShowTooltip] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const supabase = createClient()
 
+  // Configuration state - aligned with new system
+  const [temperature, setTemperature] = useState(0.5)
+  const [selectedModel, setSelectedModel] = useState<string>('')
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
+  const [customMode, setCustomMode] = useState(false)
+  const [customUserPrompt, setCustomUserPrompt] = useState('')
+  const [showCustomOverrides, setShowCustomOverrides] = useState(false)
 
+  // Initialize from agent data
   useEffect(() => {
-    loadConfiguration()
-    loadAgent()
-  }, [agentId])
+    if (agent) {
+      setSelectedModel(agent.model || 'gemini-1.5-flash')
+      setTemperature(agent.temperature || 0.5)
+
+      // Use the same prompt configuration as the agent
+      if (agent.prompt_template_id) {
+        setSelectedTemplateId(agent.prompt_template_id)
+        setCustomMode(false)
+
+        if (agent.custom_user_prompt) {
+          setCustomUserPrompt(agent.custom_user_prompt)
+          setShowCustomOverrides(true)
+        } else {
+          const template = templates.find(t => t.id === agent.prompt_template_id)
+          if (template) {
+            setCustomUserPrompt(template.user_prompt)
+          }
+        }
+      } else {
+        setCustomMode(true)
+        setCustomUserPrompt(agent.system_prompt || '')
+      }
+
+      // Add greeting message if exists
+      if (agent.greeting_message && messages.length === 0) {
+        setMessages([{
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: agent.greeting_message,
+          timestamp: new Date()
+        }])
+      }
+    }
+  }, [agent, templates])
 
   useEffect(() => {
     scrollToBottom()
   }, [messages])
 
-  const loadConfiguration = async () => {
-    try {
-      setLoadingConfig(true)
-      const [models, presets] = await Promise.all([
-        configService.getAIModels(),
-        configService.getPromptPresets()
-      ])
-
-      console.log('Loaded models:', models)
-      console.log('Models count:', models.length)
-      console.log('First model:', models[0])
-      console.log('Models are array?', Array.isArray(models))
-      console.log('Models stringified:', JSON.stringify(models))
-      setAvailableModels(models)
-      setAvailablePresets(presets)
-
-      // Set default model if not already set
-      if (!selectedModel && models.length > 0) {
-        setSelectedModel(models[0].name)
-      }
-
-      // Set default preset if not already set
-      if (!promptPreset && presets.length > 0) {
-        setPromptPreset(presets[0].id)
-        setSystemPrompt(presets[0].prompt_template)
-      }
-    } catch (error) {
-      console.error('Error loading configuration:', error)
-      toast.error('Failed to load configuration')
-      // Set loading to false even on error so dropdown isn't permanently disabled
-      setLoadingConfig(false)
-    } finally {
-      setLoadingConfig(false)
-    }
-  }
-
-  const loadAgent = async () => {
-    const { data } = await supabase
-      .from('agents')
-      .select('*')
-      .eq('id', agentId)
-      .single()
-
-    if (data) {
-      setAgent(data)
-      setTemperature(data.temperature || 0.5)
-
-      // Use agent's system prompt if available, otherwise keep the preset
-      if (data.system_prompt) {
-        setSystemPrompt(data.system_prompt)
-      }
-
-      // Set model from agent if available
-      if (data.model) {
-        setSelectedModel(data.model)
-      }
-
-      // Add welcome message if it exists
-      if (data.welcome_message) {
-        setMessages([{
-          id: '1',
-          role: 'assistant',
-          content: data.welcome_message,
-          timestamp: new Date()
-        }])
-      }
-    }
-  }
-
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  const handleSend = async () => {
+  const handleTemplateSelect = (templateId: string | null) => {
+    setSelectedTemplateId(templateId)
+
+    if (templateId) {
+      const template = templates.find(t => t.id === templateId)
+      if (template) {
+        setCustomUserPrompt(template.user_prompt)
+        setShowCustomOverrides(false)
+      }
+    }
+  }
+
+  const saveConfiguration = async () => {
+    try {
+      const updates: any = {
+        temperature,
+        model: selectedModel,
+      }
+
+      if (customMode) {
+        updates.system_prompt = customUserPrompt
+        updates.prompt_template_id = null
+        updates.custom_user_prompt = null
+      } else {
+        updates.prompt_template_id = selectedTemplateId
+        if (showCustomOverrides) {
+          const template = getTemplateById(selectedTemplateId!)
+          if (customUserPrompt !== template?.user_prompt) {
+            updates.custom_user_prompt = customUserPrompt
+          }
+        }
+      }
+
+      await updateAgent(updates)
+      toast.success('Configuration saved successfully')
+    } catch (error) {
+      toast.error('Failed to save configuration')
+    }
+  }
+
+  const handleSendMessage = async () => {
     if (!input.trim() || isLoading) return
 
     const userMessage: Message = {
@@ -136,20 +150,20 @@ export default function PlaygroundPage() {
     try {
       const response = await fetch(`/api/agents/${agentId}/chat`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: input.trim(),
-          sessionId: `playground_${agentId}_${Date.now()}`
+          message: userMessage.content,
+          sessionId: 'playground-session',
+          temperature,
+          model: selectedModel,
+          // The chat API will use the agent's prompt configuration
+          // We don't need to send system_prompt anymore
         })
       })
 
-      const data = await response.json()
+      if (!response.ok) throw new Error('Failed to get response')
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to get response')
-      }
+      const data = await response.json()
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -160,339 +174,190 @@ export default function PlaygroundPage() {
 
       setMessages(prev => [...prev, assistantMessage])
     } catch (error) {
-      console.error('Error:', error)
-      toast.error(error instanceof Error ? error.message : 'Failed to get response')
+      toast.error('Failed to send message')
     } finally {
       setIsLoading(false)
     }
   }
 
-  const handleSaveAgent = async () => {
-    try {
-      const { error } = await supabase
-        .from('agents')
-        .update({
-          temperature,
-          system_prompt: systemPrompt,
-          model: selectedModel
-        })
-        .eq('id', agentId)
-
-      if (error) throw error
-      toast.success('Agent settings saved')
-    } catch (error) {
-      toast.error('Failed to save settings')
-      console.error(error)
+  const clearConversation = () => {
+    setMessages([])
+    if (agent?.greeting_message) {
+      setMessages([{
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: agent.greeting_message,
+        timestamp: new Date()
+      }])
     }
   }
 
-  const handlePromptPresetChange = (presetId: string) => {
-    const preset = availablePresets.find(p => p.id === presetId)
-    if (preset) {
-      setPromptPreset(presetId)
-      setSystemPrompt(preset.prompt_template)
-    }
-  }
+  const loading = agentLoading || modelsLoading || templatesLoading
+  const currentTemplate = getTemplateById(selectedTemplateId || '')
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <RefreshCw className="h-8 w-8 animate-spin text-gray-400" />
+      </div>
+    )
+  }
 
   return (
-    <div className="flex h-full">
-      {/* Left Sidebar */}
-      <div className="w-96 bg-white border-r border-gray-200 p-6 overflow-y-auto h-full">
-        {/* Agent Status */}
-        <div className="mb-4">
-          <div className="text-xs text-gray-500 mb-2">Agent status:</div>
-          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-            agent?.status === 'ready'
-              ? 'bg-green-50 text-green-700 border border-green-200'
-              : agent?.status === 'training'
-              ? 'bg-yellow-50 text-yellow-700 border border-yellow-200'
-              : 'bg-gray-50 text-gray-700 border border-gray-200'
-          }`}>
-            <span className="mr-1.5">{agent?.status === 'ready' ? '●' : agent?.status === 'training' ? '●' : '○'}</span>
-            {agent?.status === 'ready' ? 'Trained' : agent?.status === 'training' ? 'Training' : 'Draft'}
-          </span>
-        </div>
+    <div className="flex h-[calc(100vh-64px)]">
+      {/* Left Panel - Configuration */}
+      <div className="w-96 border-r border-gray-200 bg-gray-50 p-6 overflow-y-auto">
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold mb-4">Configuration</h2>
 
-        <button
-          onClick={handleSaveAgent}
-          className="w-full mb-4 px-4 py-2.5 bg-gray-700 text-white rounded-lg hover:bg-gray-600 font-medium text-sm transition-colors"
-        >
-          Save to agent
-        </button>
+            {/* Model Selection */}
+            <div className="space-y-4">
+              <ModelSelector
+                models={models}
+                selectedModelId={selectedModel}
+                onModelSelect={setSelectedModel}
+                loading={modelsLoading}
+              />
 
-        {/* Configure & test agents with Compare button in single container */}
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-0.5 flex gap-1 mb-6">
-          <div className="relative flex-1">
-            <button
-              className="w-full px-4 py-1 text-sm text-gray-700 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors flex items-center justify-center gap-2"
-              onClick={() => console.log('Configure & test')}
-            >
-              Configure & test agents
-              <div
-                className="relative"
-                onMouseEnter={() => setShowTooltip(true)}
-                onMouseLeave={() => setShowTooltip(false)}
+              <TemperatureSlider
+                value={temperature}
+                onChange={setTemperature}
+              />
+
+              <TemplateSelector
+                templates={templates}
+                selectedTemplateId={selectedTemplateId}
+                onTemplateSelect={handleTemplateSelect}
+                customMode={customMode}
+                onCustomModeToggle={setCustomMode}
+                loading={templatesLoading}
+              />
+
+              <PromptEditor
+                template={currentTemplate}
+                customMode={customMode}
+                customPrompt={customUserPrompt}
+                onCustomPromptChange={setCustomUserPrompt}
+                showOverride={showCustomOverrides}
+                onOverrideToggle={setShowCustomOverrides}
+              />
+
+              <button
+                onClick={saveConfiguration}
+                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
               >
-                <Lightbulb className="h-4 w-4 text-gray-400" />
-                {showTooltip && (
-                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-80 p-4 bg-white rounded-lg shadow-xl border border-gray-200 text-left z-50">
-                    <div className="text-xs text-gray-700 space-y-3">
-                      <div>
-                        <span className="font-medium">1. Experiment with changing the agent's </span>
-                        <span className="font-medium underline">instructions</span>
-                        <span className="font-medium"> by being very clear on its role, name, goal, behavior, etc...</span>
-                      </div>
-                      <div>
-                        <span className="font-medium">2. </span>
-                        <span className="font-medium underline">Improve answers</span>
-                        <span className="font-medium"> that you don't like to teach the agent how to respond to similar questions in the future</span>
-                      </div>
-                      <div>
-                        <span className="font-medium">3. Experiment with the different models to see which works for best for your agent.</span>
-                      </div>
-                      <div className="pt-2">
-                        <span>For more information, check out our </span>
-                        <a href="#" className="underline text-blue-600">guide</a>
-                        <span>!</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </button>
-          </div>
-          <button
-            onClick={() => setCompareMode(!compareMode)}
-            className="px-5 py-1.5 bg-white text-gray-700 rounded-md hover:bg-gray-50 font-medium text-sm transition-colors shadow-sm"
-          >
-            Compare
-          </button>
-        </div>
-
-        {/* Model Selection */}
-        <div className="">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Model
-          </label>
-          <ModelDropdown
-            models={availableModels.map(model => ({
-              id: model.id,
-              name: model.name,
-              display_name: model.display_name,
-              provider: model.provider,
-              description: model.description,
-              message_credits: model.message_credits,
-            }))}
-            value={selectedModel}
-            onValueChange={(value) => {
-              console.log('Model selected:', value)
-              setSelectedModel(value)
-            }}
-            placeholder={loadingConfig ? "Loading models..." : "Select a model..."}
-            disabled={loadingConfig}
-          />
-        </div>
-
-        {/* Temperature Slider */}
-        <div className="mt-6">
-          <div className="flex justify-between items-center mb-3">
-            <label className="text-sm font-medium text-gray-700">
-              Temperature
-            </label>
-            <span className="text-sm font-medium text-gray-900">{temperature}</span>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.1"
-            value={temperature}
-            onChange={(e) => setTemperature(parseFloat(e.target.value))}
-            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-            style={{
-              background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${temperature * 100}%, #e5e7eb ${temperature * 100}%, #e5e7eb 100%)`
-            }}
-          />
-          <div className="flex justify-between mt-2">
-            <span className="text-xs text-gray-500">Reserved</span>
-            <span className="text-xs text-gray-500">Creative</span>
-          </div>
-        </div>
-
-        {/* AI Actions */}
-        <div className="mt-6">
-          <h3 className="text-sm font-medium text-gray-700 mb-3">AI Actions</h3>
-          <div className="bg-gray-50 rounded-lg p-4 text-center border border-gray-100">
-            <p className="text-sm text-gray-500">No actions found</p>
-          </div>
-        </div>
-
-        {/* System Prompt */}
-        <div className="mt-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            System prompt
-          </label>
-          <div className="relative mb-3">
-            <select
-              value={promptPreset}
-              onChange={(e) => handlePromptPresetChange(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none pr-10"
-              disabled={loadingConfig}
-            >
-              {loadingConfig ? (
-                <option>Loading presets...</option>
-              ) : (
-                <>
-                  <option value="">Custom prompt</option>
-                  {availablePresets.map(preset => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.name}
-                    </option>
-                  ))}
-                </>
-              )}
-            </select>
-            <button
-              className="absolute right-2 top-2.5 text-gray-400 hover:text-gray-600"
-              onClick={() => navigator.clipboard.writeText(systemPrompt)}
-              title="Copy to clipboard"
-            >
-              <Copy className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Instructions */}
-        <div className="">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Instructions
-          </label>
-          <textarea
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            placeholder="Enter custom instructions for your AI agent..."
-            className="w-full h-64 px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-            style={{ fontSize: '12px' }}
-          />
-        </div>
-      </div>
-
-      {/* Chat Section */}
-      <div className="flex-1 flex items-center justify-center bg-gray-50 p-8">
-        <div className="flex flex-col items-center gap-4">
-          {/* Floating Chatbox Container */}
-          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-gray-100 flex flex-col overflow-hidden" style={{height: '700px'}}>
-          {/* Chat Header */}
-          <div className="px-5 py-3 bg-white border-b border-gray-100">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-gray-900">
-                {agent?.name || 'subway-franchise.com'}
-              </div>
-              <button className="p-1 hover:bg-gray-100 rounded-full transition-colors">
-                <RefreshCw className="h-4 w-4 text-gray-500" />
+                Save Configuration
               </button>
             </div>
           </div>
+        </div>
+      </div>
 
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-6 py-4">
-            <div className="space-y-4">
-            {messages.length === 0 && (
-              <div className="flex flex-col items-start gap-3 mb-4">
-                <div className="text-sm text-gray-600 font-medium">
-                  {agent?.name || 'subway-franchise.com'}
-                </div>
-                <div className="bg-gray-100 rounded-2xl px-4 py-2.5 text-sm text-gray-700">
-                  {agent?.welcome_message || 'Hi! What can I help you with?'}
-                </div>
-              </div>
-            )}
-
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`flex gap-3 ${
-                  message.role === 'user' ? 'justify-end' : 'justify-start'
-                }`}
-              >
-                {message.role === 'assistant' && (
-                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
-                    <Bot className="h-4 w-4 text-white" />
-                  </div>
-                )}
-                <div
-                  className={`max-w-[70%] px-4 py-2.5 ${
-                    message.role === 'user'
-                      ? 'bg-gray-900 text-white rounded-full'
-                      : 'bg-gray-100 text-gray-900 rounded-2xl'
-                  }`}
-                >
-                  <p className="whitespace-pre-wrap">{message.content}</p>
-                </div>
-                {message.role === 'user' && (
-                  <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0">
-                    <User className="h-4 w-4 text-gray-600" />
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {isLoading && (
-              <div className="flex gap-3">
-                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                  <Bot className="h-4 w-4 text-white" />
-                </div>
-                <div className="bg-white px-4 py-2 rounded-lg border border-gray-200">
-                  <div className="flex gap-1">
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100" />
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200" />
-                  </div>
-                </div>
-              </div>
-            )}
-
-              <div ref={messagesEndRef} />
+      {/* Right Panel - Chat */}
+      <div className="flex-1 flex flex-col">
+        {/* Chat Header */}
+        <div className="px-6 py-4 border-b border-gray-200 bg-white flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Bot className="h-6 w-6 text-gray-700" />
+            <div>
+              <h3 className="font-semibold text-gray-900">{agent?.name || 'AI Assistant'}</h3>
+              <p className="text-xs text-gray-500">Test your agent configuration</p>
             </div>
           </div>
+          <button
+            onClick={clearConversation}
+            className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            Clear Chat
+          </button>
+        </div>
 
-          {/* Input */}
-          <div className="px-4 py-3 border-t border-gray-100 bg-white">
-            <div className="flex gap-2 items-center">
+        {/* Messages Area */}
+        <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-gray-400">
+              <Lightbulb className="h-12 w-12 mb-4" />
+              <p className="text-lg font-medium">Start a conversation</p>
+              <p className="text-sm mt-1">Test your agent with different prompts and settings</p>
+            </div>
+          ) : (
+            <div className="space-y-4 max-w-3xl mx-auto">
+              {messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`flex gap-3 ${
+                    message.role === 'user' ? 'justify-end' : 'justify-start'
+                  }`}
+                >
+                  {message.role === 'assistant' && (
+                    <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
+                      <Bot className="h-5 w-5 text-gray-600" />
+                    </div>
+                  )}
+                  <div
+                    className={`max-w-[70%] px-4 py-3 rounded-lg ${
+                      message.role === 'user'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-white border border-gray-200'
+                    }`}
+                  >
+                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                    <span className="text-xs opacity-70 mt-1 block">
+                      {message.timestamp.toLocaleTimeString()}
+                    </span>
+                  </div>
+                  {message.role === 'user' && (
+                    <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0">
+                      <User className="h-5 w-5 text-white" />
+                    </div>
+                  )}
+                </div>
+              ))}
+              {isLoading && (
+                <div className="flex gap-3">
+                  <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
+                    <Bot className="h-5 w-5 text-gray-600" />
+                  </div>
+                  <div className="bg-white border border-gray-200 px-4 py-3 rounded-lg">
+                    <div className="flex gap-1">
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100" />
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200" />
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
+
+        {/* Input Area */}
+        <div className="border-t border-gray-200 bg-white p-4">
+          <div className="max-w-3xl mx-auto">
+            <div className="flex gap-3">
               <input
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="Message..."
-                className="flex-1 px-4 py-2.5 bg-white border-0 focus:outline-none placeholder-gray-400 text-sm"
+                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                placeholder="Type your message..."
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 disabled={isLoading}
               />
-              <button className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                <Smile className="h-5 w-5 text-gray-400" />
-              </button>
               <button
-                onClick={handleSend}
+                onClick={handleSendMessage}
                 disabled={!input.trim() || isLoading}
-                className="p-2 hover:bg-gray-100 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
               >
-                <Send className="h-5 w-5 text-gray-600" />
+                <Send className="h-4 w-4" />
+                Send
               </button>
             </div>
           </div>
-          </div>
-
-          {/* Show Sources Button - Below the chatbox */}
-          <button
-            onClick={() => window.location.href = `/dashboard/agents/${agentId}/sources`}
-            className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
-          >
-            Show sources
-          </button>
         </div>
       </div>
-
     </div>
   )
 }

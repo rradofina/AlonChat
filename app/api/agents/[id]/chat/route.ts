@@ -4,6 +4,7 @@ import { chatWithProjectCredentials } from '@/lib/ai/server-utils'
 import { ChatMessage } from '@/lib/ai/providers/base'
 import { EmbeddingService } from '@/lib/services/embedding-service'
 import { z } from 'zod'
+import { injectLinksIntoResponse, extractLinksFromText, type ExtractedLink } from '@/lib/utils/link-extractor'
 
 const ChatRequestSchema = z.object({
   message: z.string().min(1),
@@ -33,12 +34,17 @@ export async function POST(
     const body = await request.json()
     const validatedData = ChatRequestSchema.parse(body)
 
-    // Get agent details
+    // Get agent details with prompt template
     const { data: agent, error: agentError } = await supabase
       .from('agents')
       .select(`
         *,
-        projects!inner(owner_id)
+        projects!inner(owner_id),
+        prompt_templates (
+          id,
+          name,
+          user_prompt
+        )
       `)
       .eq('id', agentId)
       .single()
@@ -47,11 +53,19 @@ export async function POST(
       return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
     }
 
+    // Get global admin prompt
+    const { data: globalSettings } = await supabase
+      .from('global_settings')
+      .select('value')
+      .eq('key', 'admin_system_prompt')
+      .single()
+
     // Build context using RAG if enabled
     let context = ''
     let contextChunks: any[] = []
     let ragEnabled = validatedData.useRAG
     let qaImages: string[] = []
+    let contextLinks: ExtractedLink[] = [] // Collect all links from context
 
     // Check if agent has embeddings
     if (ragEnabled) {
@@ -92,7 +106,7 @@ export async function POST(
               if (sourceChunk) {
                 const { data: source } = await supabase
                   .from('sources')
-                  .select('name, type, metadata')
+                  .select('name, type, metadata, links')
                   .eq('id', sourceChunk.source_id)
                   .single()
 
@@ -100,6 +114,7 @@ export async function POST(
                   ...chunk,
                   source: source,
                   sourceMetadata: source?.metadata,
+                  sourceLinks: source?.links,
                   position: sourceChunk.position
                 }
               }
@@ -118,6 +133,16 @@ export async function POST(
               chunk.sourceMetadata.images.forEach((img: string) => {
                 if (!qaImages.includes(img)) {
                   qaImages.push(img)
+                }
+              })
+            }
+
+            // Collect links from sources
+            if (chunk.sourceLinks && Array.isArray(chunk.sourceLinks)) {
+              chunk.sourceLinks.forEach((link: ExtractedLink) => {
+                // Add link if not already in contextLinks (avoid duplicates)
+                if (!contextLinks.find(l => l.url === link.url)) {
+                  contextLinks.push(link)
                 }
               })
             }
@@ -218,11 +243,38 @@ export async function POST(
         })
     }
 
+    // Build combined system prompt with global admin rules + user customization
+    let adminPrompt = globalSettings?.value || ''
+    let userPrompt = ''
+
+    if (agent.prompt_template_id && agent.prompt_templates) {
+      // Use template user prompt with optional custom override
+      userPrompt = agent.custom_user_prompt || agent.prompt_templates.user_prompt || ''
+    } else {
+      // Use direct custom prompt
+      userPrompt = agent.system_prompt || `You are a helpful AI assistant. Use the following knowledge base to answer questions:`
+    }
+
+    // Combine global admin prompt with context and user prompt
+    let systemPrompt = adminPrompt
+    if (context) {
+      systemPrompt += `\n\n## KNOWLEDGE BASE CONTEXT:\n${context}`
+    }
+
+    // Add link information if available
+    if (contextLinks.length > 0) {
+      const linkInstructions = `\n\n## AVAILABLE LINKS:\nWhen you need to reference links in your response, use the exact link text and URL as provided below:\n${contextLinks.map(link => `- "${link.text}": ${link.url}`).join('\n')}\n\nAlways preserve the exact link text and URL when referencing them.`
+      systemPrompt += linkInstructions
+    }
+
+    // Add user's prompt at the end (so global admin rules take precedence)
+    systemPrompt += `\n\n## ASSISTANT PERSONA:\n${userPrompt}`
+
     // Prepare messages
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: agent.system_prompt || `You are a helpful AI assistant. Use the following knowledge base to answer questions:\n\n${context}`
+        content: systemPrompt
       }
     ]
 
@@ -273,6 +325,12 @@ export async function POST(
       )
 
       response = result.content
+
+      // Process response to inject links if any were found in context
+      if (contextLinks.length > 0) {
+        response = injectLinksIntoResponse(response, contextLinks)
+      }
+
       tokensUsed = result.usage?.totalTokens || 0
       costUsd = result.estimatedCost || 0
 

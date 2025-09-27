@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { AlertCircle, Globe, Trash2, X, ChevronRight, ChevronDown, MoreHorizontal, Edit, RefreshCw, Loader2, Info, Lock, AlertTriangle, Clock } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useParams } from 'next/navigation'
@@ -687,7 +688,7 @@ export default function WebsitePage() {
                         {showAdvancedOptions ? (
                           <ChevronDown className="h-4 w-4" />
                         ) : (
-                          <ChevronRight className="h-4 w-4" />
+                          <ChevronRight className="h-5 w-5" />
                         )}
                         Advanced options
                       </button>
@@ -797,11 +798,16 @@ export default function WebsitePage() {
           </div>
 
           {/* Link Sources List - Only show entire section when we have data */}
-          {filteredSources.length > 0 && (
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Link sources</h2>
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+              Link sources
+              {!isLoading && filteredSources.length > 0 && (
+                <span className="ml-2 text-sm text-gray-500">({filteredSources.length})</span>
+              )}
+            </h2>
 
-              {/* Controls */}
+              {/* Controls - Only show when we have sources */}
+              {!isLoading && filteredSources.length > 0 && (
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-4">
                   <label className="flex items-center gap-2 text-sm text-gray-700 hover:text-gray-900 cursor-pointer">
@@ -849,10 +855,35 @@ export default function WebsitePage() {
                   </div>
                 </div>
               </div>
+              )}
 
-              {/* Sources List */}
               <div>
-                {currentSources.map((source, index) => {
+                {isLoading ? (
+                  // Skeleton loaders for loading state
+                  <div className="space-y-4">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="py-3">
+                        <div className="flex items-start gap-3">
+                          <Skeleton className="h-5 w-5 rounded" />
+                          <Skeleton className="h-5 w-5 rounded" />
+                          <div className="flex-1 space-y-2">
+                            <Skeleton className="h-4 w-3/4" />
+                            <Skeleton className="h-3 w-1/2" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : filteredSources.length === 0 ? (
+                  // Empty state
+                  <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                    <Globe className="h-12 w-12 mb-3 text-gray-300" />
+                    <p className="text-sm">No website sources yet</p>
+                    <p className="text-xs text-gray-400 mt-1">Add a website URL above to get started</p>
+                  </div>
+                ) : (
+                  // Actual sources list
+                  currentSources.map((source, index) => {
                   const isExpanded = expandedSources.has(source.id)
                   const isEditing = editingSource === source.id
 
@@ -1012,7 +1043,7 @@ export default function WebsitePage() {
                                   setOpenDropdown(openDropdown === source.id ? null : source.id)
                                 }}
                               >
-                                <MoreHorizontal className="h-4 w-4 text-gray-400" />
+                                <MoreHorizontal className="h-5 w-5 text-gray-400" />
                               </button>
                               {openDropdown === source.id && (
                               <div className="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
@@ -1061,7 +1092,7 @@ export default function WebsitePage() {
                                 {isExpanded ? (
                                   <ChevronDown className="h-4 w-4 text-gray-500" />
                                 ) : (
-                                  <ChevronRight className="h-4 w-4 text-gray-500" />
+                                  <ChevronRight className="h-5 w-5 text-gray-500" />
                                 )}
                               </button>
                             )}
@@ -1129,7 +1160,7 @@ export default function WebsitePage() {
                                               setOpenDropdown(openDropdown === linkId ? null : linkId)
                                             }}
                                           >
-                                            <MoreHorizontal className="h-4 w-4 text-gray-400" />
+                                            <MoreHorizontal className="h-5 w-5 text-gray-400" />
                                           </button>
                                           {openDropdown === linkId && (
                                             <div className="absolute right-0 mt-2 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
@@ -1166,7 +1197,7 @@ export default function WebsitePage() {
                                           className="p-1 hover:bg-gray-100 rounded opacity-0 group-hover:opacity-100 transition-opacity"
                                           title="View details"
                                         >
-                                          <ChevronRight className="h-4 w-4 text-gray-400" />
+                                          <ChevronRight className="h-5 w-5 text-gray-400" />
                                         </button>
                                       </div>
                                     </div>
@@ -1186,7 +1217,8 @@ export default function WebsitePage() {
                       {index < currentSources.length - 1 && <div className="border-b border-gray-200" />}
                     </div>
                   )
-                })}
+                })
+              )}
               </div>
 
               {/* Pagination Controls */}
@@ -1209,7 +1241,6 @@ export default function WebsitePage() {
                 itemLabel="link"
               />
             </div>
-          )}
         </div>
       </div>
 

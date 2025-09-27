@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { ArrowLeft, FileText, CheckCircle, AlertCircle, Loader2, MoreHorizontal, Trash2 } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -170,9 +171,21 @@ export function FileViewer({ file, onBack }: FileViewerProps) {
           <div className="w-full">
             {isLoadingContent ? (
               <div className="bg-white rounded-lg border border-gray-200 p-8">
-                <div className="flex flex-col items-center justify-center py-12">
-                  <Loader2 className="h-8 w-8 text-blue-500 animate-spin mb-4" />
-                  <p className="text-gray-500">Loading content...</p>
+                <div className="space-y-4">
+                  <Skeleton className="h-7 w-3/4" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-5/6" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-4/6" />
+                  <div className="pt-4">
+                    <Skeleton className="h-7 w-2/3" />
+                    <div className="mt-3 space-y-2">
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-5/6" />
+                      <Skeleton className="h-4 w-full" />
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : content ? (

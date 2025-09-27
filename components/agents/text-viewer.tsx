@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { ArrowLeft, Edit2, CheckCircle, AlertCircle, Loader2, MoreHorizontal, Trash2, Edit, Save, X } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -309,11 +310,15 @@ export function TextViewer({ text, onBack, onDelete, onUpdate }: TextViewerProps
                   </div>
                   <div>
                     {isLoadingContent ? (
-                      <div className="flex items-center justify-center py-12">
-                        <div className="flex items-center gap-2 text-gray-500">
-                          <Loader2 className="h-5 w-5 animate-spin" />
-                          <span>Loading content...</span>
-                        </div>
+                      <div className="space-y-3">
+                        <Skeleton className="h-4 w-full" />
+                        <Skeleton className="h-4 w-full" />
+                        <Skeleton className="h-4 w-5/6" />
+                        <Skeleton className="h-4 w-full" />
+                        <Skeleton className="h-4 w-4/6" />
+                        <Skeleton className="h-4 w-full" />
+                        <Skeleton className="h-4 w-5/6" />
+                        <Skeleton className="h-4 w-3/4" />
                       </div>
                     ) : (
                       <pre className="leading-7 text-gray-800 whitespace-pre-wrap font-sans text-[0.95rem]">

@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
-import { AlertCircle, Loader2, Trash2, Edit2, Save, X, MoreHorizontal, Edit, ChevronRight } from 'lucide-react'
+import { AlertCircle, Loader2, Trash2, Edit2, Save, X, MoreHorizontal, Edit, ChevronRight, Type } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
 import {
@@ -346,10 +347,14 @@ export default function TextPage() {
             </div>
           </div>
 
-          {/* Text Sources List - Only show entire section when we have text sources or loading */}
-          {(isLoading || textSources.length > 0) && (
-            <div className="mt-8">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Text sources</h2>
+          {/* Text Sources List */}
+          <div className="mt-8">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                Text sources
+                {!isLoading && textSources.length > 0 && (
+                  <span className="ml-2 text-sm text-gray-500">({textSources.length})</span>
+                )}
+              </h2>
 
               {/* Controls row - Only show when we have text sources */}
               {!isLoading && textSources.length > 0 && (
@@ -404,10 +409,29 @@ export default function TextPage() {
             {/* Text Sources List - No container, ultra-minimal */}
             <div>
               {isLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                // Skeleton loaders for loading state
+                <div className="space-y-4">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="py-4">
+                      <div className="flex items-start gap-3">
+                        <Skeleton className="h-5 w-5 rounded" />
+                        <div className="flex-1 space-y-2">
+                          <Skeleton className="h-5 w-3/4" />
+                          <Skeleton className="h-4 w-full" />
+                          <Skeleton className="h-4 w-5/6" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ) : textSources.length === 0 ? null : (
+              ) : textSources.length === 0 ? (
+                // Empty state
+                <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                  <Type className="h-12 w-12 mb-3 text-gray-300" />
+                  <p className="text-sm">No text snippets yet</p>
+                  <p className="text-xs text-gray-400 mt-1">Add a text snippet above to get started</p>
+                </div>
+              ) : (
                 <div className="divide-y divide-gray-100">
                   {currentSources.map((source) => (
                     <div key={source.id}>
@@ -466,7 +490,7 @@ export default function TextPage() {
                                   onClick={(e) => e.stopPropagation()}
                                   className="p-1 hover:bg-gray-100 rounded transition-colors"
                                 >
-                                  <MoreHorizontal className="h-4 w-4 text-gray-500" />
+                                  <MoreHorizontal className="h-5 w-5 text-gray-500" />
                                 </button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
@@ -532,7 +556,7 @@ export default function TextPage() {
                               className="p-1 hover:bg-gray-100 rounded transition-colors"
                               title="View details"
                             >
-                              <ChevronRight className="h-4 w-4 text-gray-500" />
+                              <ChevronRight className="h-5 w-5 text-gray-500" />
                             </button>
                           </div>
                         </div>
@@ -560,8 +584,7 @@ export default function TextPage() {
               isFirstPage={isFirstPage}
               isLastPage={isLastPage}
             />
-            </div>
-          )}
+          </div>
         </div>
       </div>
 

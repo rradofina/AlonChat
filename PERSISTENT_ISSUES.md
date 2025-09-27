@@ -1,5 +1,31 @@
 # PERSISTENT_ISSUES.md - Recurring Problems & Solutions
 
+## 🚨🚨🚨 CRITICAL: PORT 3000 ENFORCEMENT 🚨🚨🚨
+### ⚠️ CHECK THIS FIRST BEFORE STARTING DEV SERVER ⚠️
+
+**THE PROJECT MUST ALWAYS RUN ON PORT 3000 - NO EXCEPTIONS!**
+
+```bash
+# STEP 1: Kill any process on port 3000
+npx kill-port 3000
+# OR on Windows:
+netstat -ano | findstr :3000
+taskkill /PID [process_id] /F
+
+# STEP 2: Start dev server (MUST show port 3000)
+npm run dev
+
+# If it shows any other port (3001, 3006, etc.), STOP and fix port 3000!
+```
+
+**WHY THIS MATTERS:**
+- All environment configs assume port 3000
+- OAuth callbacks are configured for port 3000
+- API integrations expect port 3000
+- Production deployment mirrors this setup
+
+---
+
 This file tracks persistent issues that occur multiple times during development, along with their proven solutions. Update this file whenever an issue takes multiple attempts to fix or recurs after git resets/pushes.
 
 ## Purpose

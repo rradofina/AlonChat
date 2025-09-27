@@ -31,7 +31,7 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
             }
           }}
           className={`
-            w-4 h-4 border rounded cursor-pointer transition-all duration-200 flex items-center justify-center
+            w-5 h-5 border rounded cursor-pointer transition-all duration-200 flex items-center justify-center
             ${checked
               ? 'bg-gray-900 border-gray-900'
               : 'bg-white border-gray-300 hover:border-gray-400'
@@ -40,7 +40,7 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
           `}
         >
           {checked && (
-            <Check className="w-3 h-3 text-white" strokeWidth={3} />
+            <Check className="w-4 h-4 text-white" strokeWidth={3} />
           )}
         </div>
       </div>

@@ -26,6 +26,12 @@ export async function POST(
 
     console.log('Starting training for agent:', params.id, agent.name)
 
+    // Update agent status to 'training'
+    await supabase
+      .from('agents')
+      .update({ status: 'training' })
+      .eq('id', params.id)
+
     // Check if request wants to generate embeddings
     const body = await request.json().catch(() => ({}))
     const generateEmbeddings = body.generateEmbeddings !== false // Default to true
@@ -141,6 +147,12 @@ export async function POST(
       embeddingCost: embeddingResults.totalCost
     })
 
+    // Update agent status to 'ready'
+    await supabase
+      .from('agents')
+      .update({ status: 'ready' })
+      .eq('id', params.id)
+
     return NextResponse.json({
       success: true,
       message: generateEmbeddings
@@ -162,6 +174,14 @@ export async function POST(
 
   } catch (error) {
     console.error('Training error:', error)
+
+    // Update agent status to 'error'
+    const supabase = await createClient()
+    await supabase
+      .from('agents')
+      .update({ status: 'error' })
+      .eq('id', params.id)
+
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

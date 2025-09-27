@@ -2,9 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'next/navigation'
-import { AlertCircle, Loader2, Trash2, Plus, X, MoreHorizontal, Edit, ChevronRight, HelpCircle, Bold, Italic, Strikethrough, List, ListOrdered, Link, Smile, Image } from 'lucide-react'
+import { AlertCircle, Loader2, Trash2, Plus, X, MoreHorizontal, Edit, ChevronRight, HelpCircle, Image, MessageSquare } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
+import { RichTextEditor } from '@/components/ui/rich-text-editor'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -428,45 +430,18 @@ export default function QAPage() {
                   </Button>
                 </div>
 
-                {/* Answer with Rich Text Toolbar */}
+                {/* Answer with Rich Text Editor */}
                 <div>
                   <label className="text-sm text-gray-700 mb-1 block">Answer</label>
-                  <div className="border border-gray-300 rounded-md bg-white">
-                    {/* Rich text toolbar */}
-                    <div className="border-b border-gray-200 px-2 py-1 flex items-center gap-1">
-                      <button className="p-1 hover:bg-gray-100 rounded" title="Bold">
-                        <Bold className="h-4 w-4 text-gray-600" />
-                      </button>
-                      <button className="p-1 hover:bg-gray-100 rounded" title="Italic">
-                        <Italic className="h-4 w-4 text-gray-600" />
-                      </button>
-                      <button className="p-1 hover:bg-gray-100 rounded" title="Strikethrough">
-                        <Strikethrough className="h-4 w-4 text-gray-600" />
-                      </button>
-                      <div className="w-px h-4 bg-gray-300 mx-1" />
-                      <button className="p-1 hover:bg-gray-100 rounded" title="Bulleted list">
-                        <List className="h-4 w-4 text-gray-600" />
-                      </button>
-                      <button className="p-1 hover:bg-gray-100 rounded" title="Numbered list">
-                        <ListOrdered className="h-4 w-4 text-gray-600" />
-                      </button>
-                      <div className="w-px h-4 bg-gray-300 mx-1" />
-                      <button className="p-1 hover:bg-gray-100 rounded" title="Link">
-                        <Link className="h-4 w-4 text-gray-600" />
-                      </button>
-                      <button className="p-1 hover:bg-gray-100 rounded" title="Emoji">
-                        <Smile className="h-4 w-4 text-gray-600" />
-                      </button>
-                    </div>
-                    <textarea
-                      value={answer}
-                      onChange={(e) => setAnswer(e.target.value)}
-                      placeholder="Enter your answer..."
-                      className="w-full px-3 py-2 text-sm focus:outline-none min-h-[150px] resize-none"
-                    />
-                    <div className="text-right text-xs text-gray-500 px-3 py-1 border-t border-gray-200">
-                      {formatBytes(new TextEncoder().encode(answer).length)}
-                    </div>
+                  <RichTextEditor
+                    value={answer}
+                    onChange={setAnswer}
+                    placeholder="Enter your answer with formatting, links, and emojis..."
+                    disabled={isSaving}
+                    minHeight="min-h-[200px]"
+                  />
+                  <div className="text-right text-xs text-gray-500 mt-1">
+                    {formatBytes(new TextEncoder().encode(answer).length)}
                   </div>
                 </div>
 
@@ -538,10 +513,14 @@ export default function QAPage() {
             </div>
           </div>
 
-          {/* Q&A Sources List - Only show if we have data or loading */}
-          {(isLoading || qaSources.length > 0) && (
-            <div className="mt-8">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Q&A sources</h2>
+          {/* Q&A Sources List - Always visible for better UX */}
+          <div className="mt-8">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+              Q&A sources
+              {!isLoading && qaSources.length > 0 && (
+                <span className="ml-2 text-sm text-gray-500">({qaSources.length})</span>
+              )}
+            </h2>
 
               {/* Only show controls if we have data */}
               {!isLoading && qaSources.length > 0 && (
@@ -593,11 +572,37 @@ export default function QAPage() {
               </div>
             )}
 
-              {/* Q&A Sources List */}
+              {/* Q&A Sources List with Skeleton Loaders */}
               <div>
                 {isLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                  // Show skeleton loaders while loading
+                  <div className="divide-y divide-gray-100">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="py-3">
+                        <div className="flex items-center gap-3">
+                          <Skeleton className="h-5 w-5 rounded" />
+                          <Skeleton className="h-5 w-5 rounded" />
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <Skeleton className="h-4 w-[350px]" />
+                              <Skeleton className="h-5 w-12 rounded" />
+                            </div>
+                            <Skeleton className="h-3 w-[250px] mt-1" />
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Skeleton className="h-4 w-4 rounded" />
+                            <Skeleton className="h-4 w-4 rounded" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : qaSources.length === 0 ? (
+                  // Show empty state with icon
+                  <div className="text-center py-12">
+                    <MessageSquare className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500 font-medium">No Q&A pairs added yet</p>
+                    <p className="text-sm text-gray-400 mt-1">Add your first Q&A pair above to get started</p>
                   </div>
                 ) : (
                 <div className="divide-y divide-gray-100">
@@ -664,7 +669,7 @@ export default function QAPage() {
                                 onClick={(e) => e.stopPropagation()}
                                 className="p-1 hover:bg-gray-100 rounded transition-colors"
                               >
-                                <MoreHorizontal className="h-4 w-4 text-gray-500" />
+                                <MoreHorizontal className="h-5 w-5 text-gray-500" />
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
@@ -730,7 +735,7 @@ export default function QAPage() {
                             className="p-1 hover:bg-gray-100 rounded transition-colors"
                             title="View details"
                           >
-                            <ChevronRight className="h-4 w-4 text-gray-500" />
+                            <ChevronRight className="h-5 w-5 text-gray-500" />
                           </button>
                         </div>
                       </div>
@@ -740,7 +745,8 @@ export default function QAPage() {
                 )}
               </div>
 
-              {/* Pagination Controls */}
+              {/* Pagination Controls - Only show when we have data */}
+              {qaSources.length > 0 && (
               <PaginationControls
                 currentPage={currentPage}
                 totalPages={totalPages}
@@ -757,8 +763,8 @@ export default function QAPage() {
                 isFirstPage={isFirstPage}
                 isLastPage={isLastPage}
               />
-            </div>
-          )}
+              )}
+          </div>
         </div>
       </div>
 

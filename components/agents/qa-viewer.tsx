@@ -562,7 +562,7 @@ export function QAViewer({ qa, onBack, onDelete, onUpdate }: QAViewerProps) {
                     <div>
                       <h3 className="text-xs uppercase tracking-wide text-gray-400 mb-3">Answer</h3>
                       <div
-                        className="prose prose-sm max-w-none text-gray-800"
+                        className="prose prose-sm prose-p:my-0 prose-p:leading-normal max-w-none text-gray-800 [&_p]:m-0 [&_p]:leading-[1.4] [&_p+p]:mt-1"
                         dangerouslySetInnerHTML={{
                           __html: qa.answer.includes('<') ? qa.answer : `<p>${qa.answer.replace(/\n/g, '<br/>')}</p>`
                         }}

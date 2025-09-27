@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import { Upload, FileText, AlertCircle, Loader2, Trash2, ChevronRight, X, RotateCw, MoreHorizontal, Eye } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
 import {
@@ -470,13 +471,17 @@ export default function FilesPage() {
             </div>
           </div>
 
-          {/* File Sources List - Only show entire section when we have files or loading */}
-          {(isLoading || files.length > 0) && (
-            <div className="mt-8">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">File sources</h2>
-
-              {/* Controls row - Only show when we have files */}
+          {/* File Sources List - Always visible for better UX */}
+          <div className="mt-8">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+              File sources
               {!isLoading && files.length > 0 && (
+                <span className="ml-2 text-sm text-gray-500">({files.length})</span>
+              )}
+            </h2>
+
+            {/* Controls row - Only show when we have files */}
+            {!isLoading && files.length > 0 && (
               <div className="mb-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -525,13 +530,39 @@ export default function FilesPage() {
               </div>
             )}
 
-            {/* Files List - No container, ultra-minimal */}
+            {/* Files List with Skeleton Loaders */}
             <div>
               {isLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                // Show skeleton loaders while loading
+                <div className="divide-y divide-gray-100">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="py-3">
+                      <div className="flex items-center gap-3">
+                        <Skeleton className="h-5 w-5 rounded" />
+                        <Skeleton className="h-5 w-5 rounded" />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <Skeleton className="h-4 w-[250px]" />
+                            <Skeleton className="h-5 w-12 rounded" />
+                          </div>
+                          <Skeleton className="h-3 w-[150px] mt-1" />
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Skeleton className="h-4 w-4 rounded" />
+                          <Skeleton className="h-4 w-4 rounded" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ) : files.length === 0 ? null : (
+              ) : files.length === 0 ? (
+                // Show empty state with icon
+                <div className="text-center py-12">
+                  <FileText className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500 font-medium">No files uploaded yet</p>
+                  <p className="text-sm text-gray-400 mt-1">Upload files above to get started</p>
+                </div>
+              ) : (
                 <div className="divide-y divide-gray-100">
                   {currentFiles.map((file) => (
                     <div key={file.id}>
@@ -606,7 +637,7 @@ export default function FilesPage() {
                                   onClick={(e) => e.stopPropagation()}
                                   className="p-1 hover:bg-gray-100 rounded transition-colors"
                                 >
-                                  <MoreHorizontal className="h-4 w-4 text-gray-500" />
+                                  <MoreHorizontal className="h-5 w-5 text-gray-500" />
                                 </button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
@@ -784,7 +815,7 @@ export default function FilesPage() {
                               title={file.status === 'removed' ? 'Cannot view removed files' : 'View file details'}
                               disabled={file.status === 'removed'}
                             >
-                              <ChevronRight className={`h-4 w-4 ${
+                              <ChevronRight className={`h-5 w-5 ${
                                 file.status === 'removed' ? 'text-gray-300' : 'text-gray-500'
                               }`} />
                             </button>
@@ -796,27 +827,28 @@ export default function FilesPage() {
                 )}
               </div>
 
-            {/* Pagination Controls */}
-            <PaginationControls
-              currentPage={currentPage}
-              totalPages={totalPages}
-              rowsPerPage={rowsPerPage}
-              totalItems={files.length}
-              onPageChange={goToPage}
-              onRowsPerPageChange={(rows) => {
-                setRowsPerPage(rows)
-                // Clear selections when changing page size
-                setSelectedFiles([])
-              }}
-              rowsPerPageOptions={[5, 10, 25, 50]}
-              showPagination={showPagination}
-              itemsRange={itemsRange}
-              isFirstPage={isFirstPage}
-              isLastPage={isLastPage}
-              itemLabel="file"
-            />
-            </div>
-          )}
+            {/* Pagination Controls - Only show when we have files */}
+            {files.length > 0 && (
+              <PaginationControls
+                currentPage={currentPage}
+                totalPages={totalPages}
+                rowsPerPage={rowsPerPage}
+                totalItems={files.length}
+                onPageChange={goToPage}
+                onRowsPerPageChange={(rows) => {
+                  setRowsPerPage(rows)
+                  // Clear selections when changing page size
+                  setSelectedFiles([])
+                }}
+                rowsPerPageOptions={[5, 10, 25, 50]}
+                showPagination={showPagination}
+                itemsRange={itemsRange}
+                isFirstPage={isFirstPage}
+                isLastPage={isLastPage}
+                itemLabel="file"
+              />
+            )}
+          </div>
         </div>
       </div>
 

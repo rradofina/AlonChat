@@ -7,10 +7,10 @@ import { Database, FileText, Globe, MessageSquare } from 'lucide-react'
 export default async function SourcesPage({
   params
 }: {
-  params: { id: string }
+  params: Promise<{ id: string }>
 }) {
   const supabase = await createClient()
-  const agentId = params.id
+  const { id: agentId } = await params
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {

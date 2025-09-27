@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Send, X, Minimize2, Bot } from 'lucide-react'
+import { ChatMessageRenderer } from '@/components/ui/safe-html-renderer'
 
 interface Message {
   id: string
@@ -171,7 +172,10 @@ export default function WidgetChatPage({ params }: { params: { id: string } }) {
                       : 'bg-gray-100 text-gray-900'
                   }`}
                 >
-                  {message.content}
+                  <ChatMessageRenderer
+                    content={message.content}
+                    className={message.role === 'user' ? 'text-white' : 'text-gray-900'}
+                  />
                 </div>
                 {/* Display images if present */}
                 {message.images && message.images.length > 0 && (

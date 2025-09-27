@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { ChunkManager } from '@/lib/services/chunk-manager'
+import { extractLinksFromHtml, batchVerifyUrls } from '@/lib/utils/link-extractor'
 
 export async function POST(
   request: NextRequest,
@@ -101,6 +102,15 @@ export async function POST(
     // Use title or first question as name
     const name = title || questionsArray[0]
 
+    // Extract links from answer HTML
+    const extractedLinks = extractLinksFromHtml(answer)
+
+    // Optionally verify links (can be async in background for better performance)
+    // For production, you might want to do this asynchronously
+    const verifiedLinks = extractedLinks.length > 0
+      ? await batchVerifyUrls(extractedLinks)
+      : []
+
     // Prepare metadata with images
     const metadata = {
       title: title || questionsArray[0],
@@ -122,7 +132,8 @@ export async function POST(
         status: 'processing', // Use 'processing' status
         is_trained: false, // Explicitly set to false - Q&As are not trained until training is run
         chunk_count: 0,
-        metadata: metadata
+        metadata: metadata,
+        links: verifiedLinks // Store extracted and verified links
       })
       .select()
       .single()

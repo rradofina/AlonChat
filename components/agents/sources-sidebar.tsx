@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { RefreshCw, FileText, Link, HelpCircle, Type, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 
 interface SourcesSidebarProps {
   agentId: string
@@ -13,7 +14,9 @@ interface SourcesSidebarProps {
 
 export default function SourcesSidebar({ agentId, showRetrainingAlert, refreshTrigger }: SourcesSidebarProps) {
   const { toast } = useToast()
+  const supabase = createClientComponentClient()
   const [isTraining, setIsTraining] = useState(false)
+  const [agentData, setAgentData] = useState<{ last_trained_at?: string | null, status?: string }>({})
   const [stats, setStats] = useState({
     files: { count: 0, sizeKb: 0 },
     text: { count: 0, sizeKb: 0 },
@@ -26,8 +29,59 @@ export default function SourcesSidebar({ agentId, showRetrainingAlert, refreshTr
   useEffect(() => {
     if (agentId) {
       fetchStats()
+      fetchAgentData()
     }
   }, [agentId, refreshTrigger])
+
+  useEffect(() => {
+    // Set up real-time subscription for agent status updates
+    const channel = supabase
+      .channel(`agent-training-${agentId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'agents',
+          filter: `id=eq.${agentId}`
+        },
+        (payload) => {
+          setAgentData((prev) => ({
+            ...prev,
+            status: payload.new.status,
+            last_trained_at: payload.new.last_trained_at
+          }))
+          // If status changes from training to ready/error, update local training state
+          if (payload.new.status !== 'training') {
+            setIsTraining(false)
+            fetchStats() // Refresh stats after training
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [agentId])
+
+  const fetchAgentData = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('agents')
+        .select('last_trained_at, status')
+        .eq('id', agentId)
+        .single()
+
+      if (!error && data) {
+        setAgentData(data)
+        // Sync local training state with database status
+        setIsTraining(data.status === 'training')
+      }
+    } catch (error) {
+      console.error('Error fetching agent data:', error)
+    }
+  }
 
   const fetchStats = async () => {
     try {
@@ -136,7 +190,7 @@ export default function SourcesSidebar({ agentId, showRetrainingAlert, refreshTr
           </div>
         </div>
 
-        {/* Retrain Button */}
+        {/* Train/Retrain Button */}
         <Button
           className="w-full bg-gray-900 hover:bg-gray-800 text-white"
           onClick={async () => {
@@ -159,8 +213,9 @@ export default function SourcesSidebar({ agentId, showRetrainingAlert, refreshTr
                 description: data.message,
               })
 
-              // Refresh stats after training
+              // Refresh stats and agent data after training
               await fetchStats()
+              await fetchAgentData()
 
               // Trigger parent refresh if needed
               window.location.reload()
@@ -174,14 +229,55 @@ export default function SourcesSidebar({ agentId, showRetrainingAlert, refreshTr
               setIsTraining(false)
             }
           }}
-          disabled={!showRetrainingAlert || isTraining}
+          disabled={isTraining || (stats.total.count === 0 && !showRetrainingAlert)}
         >
           <RefreshCw className={`h-4 w-4 mr-2 ${isTraining ? 'animate-spin' : ''}`} />
-          {isTraining ? 'Training...' : 'Retrain agent'}
+          {isTraining
+            ? 'Training...'
+            : agentData.last_trained_at
+              ? 'Retrain agent'
+              : 'Train agent'}
         </Button>
 
+        {/* Training Progress Indicator */}
+        {(isTraining || agentData.status === 'training') && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="relative">
+                <RefreshCw className="h-5 w-5 text-blue-600 animate-spin" />
+                <div className="absolute inset-0 animate-ping">
+                  <RefreshCw className="h-5 w-5 text-blue-400 opacity-75" />
+                </div>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-blue-900">Training in progress</p>
+                <p className="text-xs text-blue-700 mt-0.5">
+                  Depending on the size of your sources, this may take a while.
+                </p>
+              </div>
+            </div>
+
+            {/* Progress bar animation */}
+            <div className="w-full bg-blue-100 rounded-full h-2 overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-blue-400 via-blue-500 to-blue-400 rounded-full animate-pulse"
+                   style={{
+                     backgroundSize: '200% 100%',
+                     animation: 'shimmer 2s linear infinite, pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+                   }}
+              />
+            </div>
+
+            <style jsx>{`
+              @keyframes shimmer {
+                0% { background-position: -200% center; }
+                100% { background-position: 200% center; }
+              }
+            `}</style>
+          </div>
+        )}
+
         {/* Retraining Alert */}
-        {showRetrainingAlert && (
+        {showRetrainingAlert && !isTraining && agentData.status !== 'training' && (
           <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
             <div className="flex gap-2">
               <AlertCircle className="h-4 w-4 text-orange-600 flex-shrink-0 mt-0.5" />

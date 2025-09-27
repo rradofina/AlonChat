@@ -77,22 +77,37 @@ export function RichTextEditor({
       TextStyle,
       Color,
       Placeholder.configure({
-        placeholder: placeholder
+        placeholder: placeholder,
+        emptyEditorClass: 'is-editor-empty',
+        showOnlyWhenEditable: true,
+        showOnlyCurrent: false,
+        includeChildren: false
       })
     ],
-    content: value,
+    content: value && value !== '<p></p>' ? value : '',
     onUpdate: ({ editor }) => {
-      onChange(editor.getHTML())
+      const html = editor.getHTML()
+      // Don't send empty paragraph tags, send empty string instead
+      onChange(html === '<p></p>' ? '' : html)
     },
     editable: !disabled,
     immediatelyRender: false,
-    autofocus: false
+    autofocus: false,
+    editorProps: {
+      attributes: {
+        class: 'focus:outline-none'
+      }
+    }
   })
 
   // Update editor content when value prop changes
   useEffect(() => {
-    if (editor && value !== editor.getHTML()) {
-      editor.commands.setContent(value)
+    if (editor) {
+      const currentContent = editor.getHTML()
+      // Only update if the value has actually changed and is not just an empty paragraph
+      if (value !== currentContent && !(value === '<p></p>' && editor.isEmpty)) {
+        editor.commands.setContent(value || '')
+      }
     }
   }, [value, editor])
 
@@ -173,12 +188,38 @@ export function RichTextEditor({
     '#8B5CF6', '#A78BFA', '#EC4899', '#F472B6'
   ]
 
+  // Add global styles for placeholder - ONLY show when entire editor is empty
+  useEffect(() => {
+    const style = document.createElement('style')
+    style.textContent = `
+      .ProseMirror.is-editor-empty p:first-child::before {
+        content: attr(data-placeholder);
+        float: left;
+        color: #9ca3af;
+        pointer-events: none;
+        height: 0;
+      }
+      /* Messenger-like tight spacing */
+      .ProseMirror p {
+        margin: 0;
+        line-height: 1.4;
+      }
+      .ProseMirror p + p {
+        margin-top: 0.25rem;
+      }
+    `
+    document.head.appendChild(style)
+    return () => {
+      document.head.removeChild(style)
+    }
+  }, [])
+
   if (!editor) {
     return null
   }
 
   return (
-    <div className={cn("border border-gray-300 rounded-md bg-white", className)}>
+    <div className={cn("border border-gray-300 rounded-md bg-white", disabled && "bg-gray-50", className)}>
       {/* Toolbar */}
       <div className="border-b border-gray-200 p-2 flex items-center gap-1 flex-wrap">
         {/* Font Size */}
@@ -510,9 +551,18 @@ export function RichTextEditor({
       <EditorContent
         editor={editor}
         className={cn(
-          "prose prose-sm max-w-none p-3 focus:outline-none",
+          "prose prose-sm prose-p:my-0 prose-p:leading-normal max-w-none p-4 focus:outline-none",
           minHeight,
-          "overflow-y-auto"
+          "overflow-y-auto",
+          "[&_.ProseMirror]:outline-none",
+          "[&_.ProseMirror]:min-h-[inherit]",
+          // Placeholder styles - only show when ENTIRE editor is empty
+          "[&_.ProseMirror.is-editor-empty_p:first-child::before]:content-[attr(data-placeholder)]",
+          "[&_.ProseMirror.is-editor-empty_p:first-child::before]:text-gray-400",
+          "[&_.ProseMirror.is-editor-empty_p:first-child::before]:float-left",
+          "[&_.ProseMirror.is-editor-empty_p:first-child::before]:pointer-events-none",
+          "[&_.ProseMirror.is-editor-empty_p:first-child::before]:h-0",
+          disabled && "opacity-60 cursor-not-allowed bg-gray-50"
         )}
       />
     </div>
